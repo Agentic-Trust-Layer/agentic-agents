@@ -1,4 +1,4 @@
-# JavaScript Samples
+# Agentic Agents - A2A and ERC-8004
 
 The provided samples are built using [Genkit](https://genkit.dev/) using the Gemini API.
 
