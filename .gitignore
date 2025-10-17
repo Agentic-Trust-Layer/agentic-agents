@@ -1,0 +1,22 @@
+node_modules
+.genkit
+.firebase
+.a2a-tasks
+*.json.secret
+
+# dependencies
+node_modules
+
+# build
+.next
+dist
+.out
+
+# env
+.env
+.env.local
+
+# db
+data
+*.db
+*.sqlite
