@@ -45,6 +45,21 @@ app.get('/api/config/agent-ids', (req, res) => {
   });
 });
 
+// Get client address derived from CLIENT_PRIVATE_KEY in env
+app.get('/api/config/client-address', (req, res) => {
+  try {
+    const clientPrivateKey = (process.env.CLIENT_PRIVATE_KEY || '').trim() as `0x${string}`;
+    if (!clientPrivateKey || !clientPrivateKey.startsWith('0x') || clientPrivateKey.length !== 66) {
+      return res.json({ clientAddress: '' });
+    }
+    const account = privateKeyToAccount(clientPrivateKey);
+    return res.json({ clientAddress: account.address });
+  } catch (error: any) {
+    console.error('[WebClient] Error deriving client address:', error?.message || error);
+    return res.json({ clientAddress: '' });
+  }
+});
+
 // Agent card endpoint
 app.get('/.well-known/agent-card.json', (req, res) => {
   try {
@@ -165,6 +180,31 @@ app.get('/api/feedback/accept', async (req, res) => {
     res.json({ result });
   } catch (error: any) {
     console.error('[WebClient] Error accepting feedback:', error?.message || error);
+    res.status(500).json({ error: error?.message || 'Internal server error' });
+  }
+});
+
+// Get feedback auth (GET) - accepts query params: clientAddress, agentName
+app.get('/api/feedback-auth', async (req, res) => {
+  try {
+    const clientAddress = String(req.query.clientAddress || '').trim();
+    const agentName = String(req.query.agentName || '').trim();
+    if (!clientAddress || !clientAddress.startsWith('0x') || clientAddress.length !== 42) {
+      return res.status(400).json({ error: 'clientAddress must be a 0x-prefixed 20-byte address' });
+    }
+    if (!agentName) {
+      return res.status(400).json({ error: 'agentName is required' });
+    }
+
+    const movieAgentUrl = process.env.MOVIE_AGENT_URL || 'http://localhost:41241';
+    const resp = await fetch(`${movieAgentUrl.replace(/\/+$/, '')}/api/feedback-auth/${clientAddress}`);
+    if (!resp.ok) {
+      throw new Error(`Movie agent responded with ${resp.status}`);
+    }
+    const data = await resp.json();
+    res.json({ feedbackAuthId: data.feedbackAuthId });
+  } catch (error: any) {
+    console.error('[WebClient] Error getting feedback auth ID:', error?.message || error);
     res.status(500).json({ error: error?.message || 'Internal server error' });
   }
 });

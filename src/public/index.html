@@ -334,19 +334,14 @@
                 <!-- Quick Actions -->
                 <div style="margin-bottom: 20px;">
                     <button onclick="checkAgentStatus()" class="btn">Check Agent Status</button>
-                    <button onclick="testFeedbackAuth()" class="btn btn-secondary">Test Feedback Auth</button>
-                </div>
+                 </div>
 
                 <!-- Feedback Auth Test -->
                 <div id="feedbackAuthTest" style="display: none;">
                     <h3>🔐 Feedback Auth Test</h3>
                     <div class="form-group">
-                        <label for="clientId">Client Agent ID:</label>
-                        <input type="number" id="clientId" value="">
-                    </div>
-                    <div class="form-group">
-                        <label for="serverId">Server Agent ID:</label>
-                        <input type="number" id="serverId" value="">
+                        <label for="agentName">Agent Name:</label>
+                        <input type="string" id="agentName" value="">
                     </div>
                     <button onclick="getFeedbackAuthId()" class="btn">Get Feedback Auth ID</button>
                     <div id="authResult" style="margin-top: 10px;"></div>
@@ -417,6 +412,9 @@
             
             const rating = document.getElementById('rating').value;
             const comment = document.getElementById('comment').value;
+
+            console.info("********************** rating => rating", rating);
+            console.info("********************** comment => comment", comment);
             
             try {
                 const response = await fetch('/api/feedback', {
@@ -592,26 +590,36 @@
             }
         }
 
-        // Test feedback auth
-        function testFeedbackAuth() {
-            document.getElementById('feedbackAuthTest').style.display = 'block';
-        }
+
 
         // Get feedback auth ID
         async function getFeedbackAuthId() {
-            const clientId = document.getElementById('clientId').value;
-            const serverId = document.getElementById('serverId').value;
+
+            const agentName = document.getElementById('agentName').value;
             const resultEl = document.getElementById('authResult');
-            
-            if (!clientId || !serverId) {
-                resultEl.innerHTML = '<div class="status error">Please enter both Client ID and Server ID</div>';
+
+            // Resolve clientAddress from backend service; fallback to manual field if provided
+            let clientAddress = '';
+            try {
+                const addrResp = await fetch('/api/config/client-address');
+                if (addrResp.ok) {
+                    const addrJson = await addrResp.json();
+                    clientAddress = (addrJson.clientAddress || '').trim();
+                }
+            } catch {}
+            if (!clientAddress) {
+                clientAddress = (document.getElementById('clientAddress').value || '').trim();
+            }
+
+            if (!clientAddress || !agentName) {
+                resultEl.innerHTML = '<div class="status error">Please provide agent name; client address must be set in env or field</div>';
                 return;
             }
-            
+
             try {
-                const response = await fetch(`/api/feedback-auth/${clientId}/${serverId}`);
+                const response = await fetch(`/api/feedback-auth?clientAddress=${encodeURIComponent(clientAddress)}&agentName=${encodeURIComponent(agentName)}`);
                 const result = await response.json();
-                
+
                 if (response.ok) {
                     resultEl.innerHTML = `
                         <div class="status success">
