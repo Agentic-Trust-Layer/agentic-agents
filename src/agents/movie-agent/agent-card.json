@@ -12,6 +12,15 @@
       "inputModes": [],
       "outputModes": [],
       "description": ""
+    },
+    {
+      "id": "agent.feedback.requestAuth",
+      "name": "agent.feedback.requestAuth",
+      "tags": ["erc8004","feedback","auth","a2a"],
+      "examples": ["Client requests feedbackAuth after receiving results"],
+      "inputModes": ["text"],
+      "outputModes": ["text"],
+      "description": "Issue a signed ERC-8004 feedbackAuth for a client to submit feedback"
     }
   ],
   "registrations": [

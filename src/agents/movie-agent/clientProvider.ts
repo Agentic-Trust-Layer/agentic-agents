@@ -7,24 +7,23 @@ let reputationClient: AIAgentReputationClient | null = null;
 let identityClient: AIAgentIdentityClient | null = null;
 
 
-export function initReputationClient(params: {
+export async function initReputationClient(params: {
   publicClient: PublicClient;
   walletClient?: WalletClient;
   agentAccount?: Account;
   clientAccount?: Account;
   reputationRegistry: `0x${string}`;
-  identityRegistry: `0x${string}`;
   ensRegistry: `0x${string}`;
 }) {
-  const { publicClient, walletClient, clientAccount, agentAccount, reputationRegistry, identityRegistry, ensRegistry } = params;
+  const { publicClient, walletClient, clientAccount, agentAccount, reputationRegistry, ensRegistry } = params;
   const clientAdapter = new ViemAdapter(publicClient as any, walletClient as any, clientAccount as any);
   const agentAdapter = new ViemAdapter(publicClient as any, walletClient as any, agentAccount as any);
-  reputationClient = new AIAgentReputationClient(
-    agentAdapter as any, 
-    clientAdapter as any, 
-    reputationRegistry, 
-    identityRegistry,
-    ensRegistry);
+  reputationClient = await AIAgentReputationClient.create(
+    agentAdapter as any,
+    clientAdapter as any,
+    reputationRegistry,
+    ensRegistry,
+  );
 }
 
 export function getReputationClient(): AIAgentReputationClient {

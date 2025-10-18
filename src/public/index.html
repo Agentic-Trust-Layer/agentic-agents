@@ -270,6 +270,15 @@
             <p>Interact with the Movie Agent and manage feedback</p>
         </div>
 
+        <!-- Movie Agent Feedback -->
+        <div class="section" style="border-right: none; border-bottom: 1px solid #eee;">
+            <h2>⚙️ Movie Agent Feedback</h2>
+            <div class="form-group">
+                <label for="globalAgentName">Agent Name (ENS):</label>
+                <input type="text" id="globalAgentName" placeholder="moviereviewagent.orgtrust.eth">
+            </div>
+        </div>
+
         <div class="main-content">
             <!-- Feedback Management Section -->
             <div class="section">
@@ -340,8 +349,8 @@
                 <div id="feedbackAuthTest" style="display: none;">
                     <h3>🔐 Feedback Auth Test</h3>
                     <div class="form-group">
-                        <label for="agentName">Agent Name:</label>
-                        <input type="string" id="agentName" value="">
+                        <label for="agentName">Agent Name (override):</label>
+                        <input type="string" id="agentName" value="" placeholder="Leave blank to use global Agent Name">
                     </div>
                     <button onclick="getFeedbackAuthId()" class="btn">Get Feedback Auth ID</button>
                     <div id="authResult" style="margin-top: 10px;"></div>
@@ -371,28 +380,22 @@
         document.addEventListener('DOMContentLoaded', function() {
             loadFeedback();
             checkAgentStatus();
-            loadDefaultAgentIds();
+
+            // Optional: prefill from query string "agentName"
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const name = (params.get('agentName') || '').trim();
+                if (name) {
+                    const input = document.getElementById('globalAgentName');
+                    if (input) input.value = name;
+                }
+            } catch {}
             
             // Setup form submission
             document.getElementById('feedbackForm').addEventListener('submit', handleFeedbackSubmit);
         });
 
-        // Load default agent IDs from environment variables
-        async function loadDefaultAgentIds() {
-            try {
-                const response = await fetch('/api/config/agent-ids');
-                if (response.ok) {
-                    const config = await response.json();
-                    document.getElementById('clientId').value = config.clientId;
-                    document.getElementById('serverId').value = config.serverId;
-                }
-            } catch (error) {
-                console.warn('Failed to load default agent IDs:', error);
-                // Fallback to hardcoded defaults
-                document.getElementById('clientId').value = '1';
-                document.getElementById('serverId').value = '4';
-            }
-        }
+
 
         // Show status message
         function showStatus(message, type = 'info') {
@@ -412,11 +415,33 @@
             
             const rating = document.getElementById('rating').value;
             const comment = document.getElementById('comment').value;
+            const agentName = (document.getElementById('globalAgentName')?.value || '').trim();
 
             console.info("********************** rating => rating", rating);
             console.info("********************** comment => comment", comment);
             
             try {
+                // If agentName is set, fetch feedbackAuth first
+                let feedbackAuthId = '';
+                if (agentName) {
+                    try {
+                        const addrResp = await fetch('/api/config/client-address');
+                        const addrJson = addrResp.ok ? await addrResp.json() : { clientAddress: '' };
+                        const clientAddress = (addrJson.clientAddress || '').trim();
+                        if (!clientAddress) throw new Error('Client address not available on server');
+                        const faResp = await fetch(`/api/feedback-auth?clientAddress=${encodeURIComponent(clientAddress)}&agentName=${encodeURIComponent(agentName)}`);
+                        const fa = await faResp.json();
+                        if (faResp.ok && fa?.feedbackAuthId) {
+                            feedbackAuthId = fa.feedbackAuthId;
+                        } else {
+                            throw new Error(fa?.error || 'Failed to obtain feedbackAuth');
+                        }
+                    } catch (e) {
+                        // Surface but allow proceeding without auth
+                        showStatus(`Warning: could not obtain feedbackAuth (${e.message || e})`, 'error');
+                    }
+                }
+
                 const response = await fetch('/api/feedback', {
                     method: 'POST',
                     headers: {
@@ -424,7 +449,9 @@
                     },
                     body: JSON.stringify({
                         rating: parseInt(rating),
-                        comment
+                        comment,
+                        ...(agentName ? { agentName } : {}),
+                        ...(feedbackAuthId ? { feedbackAuthId } : {})
                     })
                 });
                 
@@ -446,7 +473,10 @@
         // Load feedback list
         async function loadFeedback() {
             try {
-                const response = await fetch('/api/feedback');
+                console.info(" load feedback from web client");
+                const agentName = (document.getElementById('globalAgentName')?.value || '').trim();
+                const qs = agentName ? `?agentName=${encodeURIComponent(agentName)}` : '';
+                const response = await fetch(`/api/feedback${qs}`);
                 const feedback = await response.json();
                 
                 currentFeedback = feedback;
@@ -595,7 +625,7 @@
         // Get feedback auth ID
         async function getFeedbackAuthId() {
 
-            const agentName = document.getElementById('agentName').value;
+            const agentName = (document.getElementById('globalAgentName')?.value || document.getElementById('agentName')?.value || '').trim();
             const resultEl = document.getElementById('authResult');
 
             // Resolve clientAddress from backend service; fallback to manual field if provided

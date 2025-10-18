@@ -22,7 +22,6 @@ import {
     Delegation
   } from "@metamask/delegation-toolkit";
 import { sepolia } from "viem/chains";
-import { getFeedbackDatabase, type FeedbackRecord } from './feedbackStorage.js';
 
 import { ethers } from 'ethers';
 
@@ -49,7 +48,6 @@ export async function createFeedbackAuth(params: {
   walletClient?: any;
   indexLimitOverride?: bigint;
   expirySeconds?: number;
-  identityRegistryOverride?: `0x${string}`;
   chainIdOverride?: bigint;
 }): Promise<`0x${string}`> {
   const {
@@ -61,14 +59,13 @@ export async function createFeedbackAuth(params: {
     walletClient,
     indexLimitOverride,
     expirySeconds = 3600,
-    identityRegistryOverride,
     chainIdOverride,
   } = params;
 
   const rep = getReputationClient();
+  const identityReg = await rep.getIdentityRegistry();
 
   // Ensure IdentityRegistry operator approvals are configured for sessionAA
-  const identityReg = await rep.getIdentityRegistry();
   console.info("**********************************")
   try {
     const ownerOfAgent = await publicClient.readContract({
@@ -101,17 +98,12 @@ export async function createFeedbackAuth(params: {
 
   const nowSec = BigInt(Math.floor(Date.now() / 1000));
   const chainId = chainIdOverride ?? BigInt(publicClient.chain?.id ?? 0);
-  const identityRegistry = identityRegistryOverride ?? await rep.getIdentityRegistry();
+
   const U64_MAX = 18446744073709551615n;
   const lastIndexFetched = indexLimitOverride !== undefined
     ? (indexLimitOverride - 1n)
     : await rep.getLastIndex(agentId, clientAddress);
-  const lastIndex = lastIndexFetched > U64_MAX ? U64_MAX : lastIndexFetched;
-  let indexLimit = indexLimitOverride ?? (lastIndex + 1n);
-  if (indexLimit > U64_MAX) {
-    console.warn('[FeedbackAuth] Computed indexLimit exceeds uint64; clamping to max');
-    indexLimit = U64_MAX;
-  }
+  let indexLimit = lastIndexFetched + 1n;
   let expiry = nowSec + BigInt(expirySeconds);
   if (expiry > U64_MAX) {
     console.warn('[FeedbackAuth] Computed expiry exceeds uint64; clamping to max');
@@ -475,8 +467,6 @@ export async function giveFeedbackWithDelegation(params: {
     const walletClient = createWalletClient({ chain: sepolia, transport: http(sp.rpcUrl) }) as any;
     const publicClient = createPublicClient({ chain: sepolia, transport: http(sp.rpcUrl) });
 
-    const identityReg = await fetchIdentityRegistry(publicClient as any, sp.reputationRegistry as `0x${string}`);
-    
 
     // signer: agent owner/operator derived from session key
     const ownerEOA = privateKeyToAccount(sp.sessionKey.privateKey);
@@ -490,13 +480,12 @@ export async function giveFeedbackWithDelegation(params: {
     } as any);
 
 
-    initReputationClient({
+    await initReputationClient({
       publicClient: publicClient as any,
       walletClient: walletClient as any,
       agentAccount: (signerSmartAccount) as any,
       clientAccount: (clientAccount) as any,
-      reputationRegistry: sp.reputationRegistry as `0x${string}`,
-      identityRegistry: identityReg as any,
+      reputationRegistry: sp.reputationRegistry as `0x${string}`
     } as any);
 
     const rep = getReputationClient();
@@ -545,7 +534,7 @@ export async function giveFeedbackWithDelegation(params: {
 
     const lastIndexFetched = await rep.getLastIndex(BigInt(agentId), clientAddress);
     const lastIndex = lastIndexFetched > U64_MAX ? U64_MAX : lastIndexFetched;
-    let indexLimit = (lastIndex + 1n);
+    let indexLimit = (lastIndex + 10n);
     if (indexLimit > U64_MAX) {
       console.warn('[FeedbackAuth] Computed indexLimit exceeds uint64; clamping to max');
       indexLimit = U64_MAX;
@@ -556,13 +545,14 @@ export async function giveFeedbackWithDelegation(params: {
       expiry = U64_MAX;
     }
 
+    const identityReg = await rep.getIdentityRegistry();
     feedbackAuth = await rep.signFeedbackAuth({
       agentId,
       clientAddress: clientAccount.address as `0x${string}`,
       indexLimit: indexLimit,
       expiry: expiry,
       chainId: chainId,
-      identityRegistry: identityReg as `0x${string}`,
+      identityRegistry: identityReg,
       signerAddress: sp.sessionAA as `0x${string}`,
     }) as `0x${string}`;
     
@@ -573,16 +563,14 @@ export async function giveFeedbackWithDelegation(params: {
   // not give feedback from client account
   const walletClient = createWalletClient({ chain: sepolia, transport: http(sp.rpcUrl) }) as any;
   const publicClient = createPublicClient({ chain: sepolia, transport: http(sp.rpcUrl) });
-  const identityReg = await fetchIdentityRegistry(publicClient as any, sp.reputationRegistry as `0x${string}`);
 
 
-  initReputationClient({
+  await initReputationClient({
     publicClient: publicClient as any,
     walletClient: walletClient as any,
     agentAccount: (clientAccount) as any,
     clientAccount: (clientAccount) as any,
-    reputationRegistry: sp.reputationRegistry as `0x${string}`,
-    identityRegistry: identityReg as any,
+    reputationRegistry: sp.reputationRegistry as `0x${string}`
   } as any);
 
   console.info("*************** giveFeedback with delegation yyy 1");
@@ -624,22 +612,67 @@ export async function addFeedback(params: {
   domain: string;
   rating: number;
   comment: string;
-  feedbackId?: number;
-}> {
+  proofOfPayment?: string;
+}>{
   const { rating, comment, feedbackAuthId, taskId, contextId, isReserve = false, proofOfPayment } = params;
   
   // Use environment variables or defaults
-  const agentId = params.agentId || BigInt(process.env.AGENT_CLIENT_ID || '6');
+  const agentId = params.agentId;
   console.info("********************** agentId => agentId", agentId);
   const domain = params.domain || process.env.AGENT_DOMAIN || 'movieclient.localhost:3001';
   
   try {
-    console.info('ERC-8004: addFeedback(agentId=%s, domain=%s, rating=%s)', agentId.toString(), domain, rating);
+    console.info('ERC-8004: addFeedback(agentId=%s, domain=%s, rating=%s)', agentId?.toString?.() || 'n/a', domain, rating);
     
     // Get chain ID from environment or default to Sepolia
     const chainId = process.env.ERC8004_CHAIN_ID || '11155111';
     
     const finalFeedbackAuthId = feedbackAuthId || '';
+    let onChainTxHash: `0x${string}` | undefined = undefined;
+
+    // If we have a feedbackAuth and agentId, attempt on-chain submission via Reputation SDK
+    if (finalFeedbackAuthId && agentId && agentId > 0n) {
+      try {
+        const rpcUrl = (process.env.RPC_URL || process.env.JSON_RPC_URL || 'https://rpc.sepolia.org');
+        const repReg = (process.env.REPUTATION_REGISTRY || process.env.ERC8004_REPUTATION_REGISTRY || '').trim() as `0x${string}`;
+        if (!repReg) throw new Error('REPUTATION_REGISTRY env var is required to submit on-chain feedback');
+
+        const clientPrivateKey = (process.env.CLIENT_PRIVATE_KEY || '').trim() as `0x${string}`;
+        if (!clientPrivateKey || !clientPrivateKey.startsWith('0x')) {
+          throw new Error('CLIENT_PRIVATE_KEY not set or invalid. Please set a 0x-prefixed 32-byte hex in .env');
+        }
+
+        const walletClient = createWalletClient({ chain: sepolia, transport: http(rpcUrl) }) as any;
+        const publicClient = createPublicClient({ chain: sepolia, transport: http(rpcUrl) });
+        const clientAccount = privateKeyToAccount(clientPrivateKey);
+
+        await initReputationClient({
+          publicClient: publicClient as any,
+          walletClient: walletClient as any,
+          agentAccount: (clientAccount) as any,
+          clientAccount: (clientAccount) as any,
+          reputationRegistry: repReg,
+          ensRegistry: (process.env.ENS_REGISTRY || process.env.NEXT_PUBLIC_ENS_REGISTRY || '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e') as any,
+        } as any);
+
+        const rep = getReputationClient();
+        const zeroBytes32 = '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`;
+        const ratingPctForChain = Math.max(0, Math.min(100, rating * 20));
+        const { txHash } = await rep.giveClientFeedback({
+          agentId,
+          score: ratingPctForChain,
+          tag1: zeroBytes32 as any,
+          tag2: zeroBytes32 as any,
+          feedbackUri: '',
+          feedbackHash: zeroBytes32 as any,
+          feedbackAuth: finalFeedbackAuthId as `0x${string}`,
+        } as any);
+        onChainTxHash = txHash as `0x${string}`;
+        console.info('ERC-8004: on-chain feedback submitted, txHash:', onChainTxHash);
+      } catch (e: any) {
+        console.warn('ERC-8004: on-chain feedback submission skipped/failed:', e?.message || e);
+      }
+    }
     
     // Determine agent skill ID
     const agentSkillId = isReserve ? 'reserve:v1' : 'finder:v1';
@@ -647,38 +680,22 @@ export async function addFeedback(params: {
     // Convert rating from 1-5 scale to percentage (0-100)
     const ratingPct = Math.max(0, Math.min(100, rating * 20));
     
-    // Create feedback record
-    const feedbackRecord: Omit<FeedbackRecord, 'id' | 'createdAt'> = {
-      feedbackAuthId: finalFeedbackAuthId || '',
-      agentSkillId,
-      taskId: taskId ? String(taskId) : '',
-      contextId: contextId ? String(contextId) : '',
-      rating: ratingPct,
-      domain,
-      notes: comment,
-      proofOfPayment: proofOfPayment || undefined
-    };
     
-    // Save to database
-    const feedbackDb = getFeedbackDatabase();
-    const feedbackId = feedbackDb.addFeedback(feedbackRecord);
-    
-    console.info('ERC-8004: Feedback saved with ID:', feedbackId);
     
     return {
       status: 'ok',
-      agentId: agentId.toString(),
+      agentId: (agentId || 0n).toString(),
       domain,
       rating,
       comment,
-      feedbackId
+      ...(onChainTxHash && { proofOfPayment: onChainTxHash as string })
     };
     
   } catch (error: any) {
     console.info('ERC-8004: addFeedback failed:', error?.message || error);
     return {
       status: 'error',
-      agentId: agentId.toString(),
+      agentId: (params.agentId || 0n).toString(),
       domain,
       rating,
       comment
@@ -692,8 +709,9 @@ export async function addFeedback(params: {
 export async function acceptFeedbackWithDelegation(params: {
   clientAccount: any;
   agentName: string;
+  feedbackAuth: `0x${string}`;
 }): Promise<string> {
-  const { clientAccount, agentName } = params;
+  const { clientAccount, agentName, feedbackAuth } = params;
 
 
   const rpcUrl = (process.env.RPC_URL || process.env.JSON_RPC_URL || 'https://rpc.sepolia.org');
@@ -711,9 +729,7 @@ export async function acceptFeedbackWithDelegation(params: {
   } catch (e: any) {
     throw new Error(`Invalid REPUTATION_REGISTRY address: ${repRegRaw}`);
   }
-  console.info("*************** reputationRegistry", reputationRegistry);
-  const identityReg = await fetchIdentityRegistry(pub as any, reputationRegistry);
-  console.info("*************** identityReg", identityReg);
+
 
   // Initialize identity client to resolve agent info by name
   const ensRegistry = (process.env.ENS_REGISTRY || process.env.NEXT_PUBLIC_ENS_REGISTRY || '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e') as `0x${string}`;
@@ -721,7 +737,6 @@ export async function acceptFeedbackWithDelegation(params: {
     publicClient: pub as any,
     walletClient: wal as any,
     agentAccount: clientAccount as any,
-    identityRegistry: identityReg as any,
     ensRegistry,
   } as any);
   const identity = getIdentityClient();
@@ -731,37 +746,21 @@ export async function acceptFeedbackWithDelegation(params: {
     throw new Error(`Agent not found for name: ${agentName}`);
   }
 
-  // get feedback auth from server
-  const clientAddress = (clientAccount?.address || clientAccount?.account?.address) as `0x${string}`;
-  if (!clientAddress) {
-    throw new Error('clientAccount.address is required to fetch feedback auth');
-  }
-  let movieAgentUrl = process.env.MOVIE_AGENT_URL || null;
-  if (!movieAgentUrl) {
-    movieAgentUrl = (await identity.getAgentUrlByName(agentName)) || 'http://localhost:41241';
-  }
-  const baseUrl = String(movieAgentUrl).replace(/\/+$/, '');
-  const resp = await fetch(`${baseUrl}/api/feedback-auth/${clientAddress}`);
-  if (!resp.ok) {
-    throw new Error(`Failed to fetch feedback auth from agent (${resp.status})`);
-  }
-  const json = await resp.json().catch(() => ({}));
-  const feedbackAuth = (json?.feedbackAuthId || json?.feedbackAuth || '0x') as `0x${string}`;
+  // Use provided feedbackAuth; do not derive here
   if (!feedbackAuth || feedbackAuth === '0x') {
-    throw new Error('Agent returned empty feedbackAuth');
+    throw new Error('feedbackAuth is required');
   }
 
   // add feedback to reputation registry
-  initReputationClient({
+  await initReputationClient({
     publicClient: pub as any,
     walletClient: wal as any,
     clientAccount: (clientAccount) as any,
     reputationRegistry: reputationRegistry as `0x${string}`,
-    identityRegistry: identityReg as any,
     ensRegistry,
   } as any);
 
-  // feedbackAuth fetched above from server
+  // feedbackAuth provided by caller
 
   console.info("*************** giveFeedback with delegation yyy 2");
   const rep = getReputationClient();
@@ -796,10 +795,7 @@ export async function getFeedbackAuthId(params: {
 
   const walletClient = createWalletClient({ chain: sepolia, transport: http(sp.rpcUrl) }) as any;
   const publicClient = createPublicClient({ chain: sepolia, transport: http(sp.rpcUrl) });
-
-  const identityReg = await fetchIdentityRegistry(publicClient as any, sp.reputationRegistry as `0x${string}`);
   
-
   // signer: agent owner/operator derived from session key
   const ownerEOA = privateKeyToAccount(sp.sessionKey.privateKey);
   
@@ -812,12 +808,11 @@ export async function getFeedbackAuthId(params: {
   } as any);
 
 
-  initReputationClient({
+  await initReputationClient({
     publicClient: publicClient as any,
     walletClient: walletClient as any,
     agentAccount: (signerSmartAccount) as any,
     reputationRegistry: sp.reputationRegistry as `0x${string}`,
-    identityRegistry: identityReg as any,
   } as any);
 
   const rep = getReputationClient();
@@ -828,7 +823,7 @@ export async function getFeedbackAuthId(params: {
 
   const lastIndexFetched = await rep.getLastIndex(BigInt(agentId), clientAddress);
   const lastIndex = lastIndexFetched > U64_MAX ? U64_MAX : lastIndexFetched;
-  let indexLimit = (lastIndex + 1n);
+  let indexLimit = (lastIndex + 10n);
   if (indexLimit > U64_MAX) {
     console.warn('[FeedbackAuth] Computed indexLimit exceeds uint64; clamping to max');
     indexLimit = U64_MAX;
@@ -839,6 +834,7 @@ export async function getFeedbackAuthId(params: {
     expiry = U64_MAX;
   }
 
+  const identityReg = await rep.getIdentityRegistry();
   feedbackAuth = await rep.signFeedbackAuth({
     agentId,
     clientAddress: clientAddress as `0x${string}`,
@@ -862,13 +858,12 @@ export async function requestFeedbackAuth(params: {
   chainId?: number;
   indexLimit?: bigint;
   expirySeconds?: number;
-}): Promise<{ eip712: any; signature: `0x${string}`; signerAddress: `0x${string}` }> {
+}): Promise<{ signature: `0x${string}`; signerAddress: `0x${string}` }> {
   const sp = buildDelegationSetup();
   const agentId = params.agentId || BigInt(sp.agentId);
 
   const walletClient = createWalletClient({ chain: sepolia, transport: http(sp.rpcUrl) }) as any;
   const publicClient = createPublicClient({ chain: sepolia, transport: http(sp.rpcUrl) });
-  const identityReg = await fetchIdentityRegistry(publicClient as any, sp.reputationRegistry as `0x${string}`);
 
   // signer: agent owner/operator derived from session key
   const ownerEOA = privateKeyToAccount(sp.sessionKey.privateKey);
@@ -880,12 +875,12 @@ export async function requestFeedbackAuth(params: {
     signatory: { account: ownerEOA as any },
   } as any);
 
-  initReputationClient({
+  await initReputationClient({
     publicClient: publicClient as any,
     walletClient: walletClient as any,
     agentAccount: (signerSmartAccount) as any,
     reputationRegistry: sp.reputationRegistry as `0x${string}`,
-    identityRegistry: identityReg as any,
+
   } as any);
   const rep = getReputationClient();
 
@@ -894,12 +889,15 @@ export async function requestFeedbackAuth(params: {
   const U64_MAX = 18446744073709551615n;
 
   const lastIndexFetched = await rep.getLastIndex(BigInt(agentId), params.clientAddress);
-  const lastIndex = lastIndexFetched > U64_MAX ? U64_MAX : lastIndexFetched;
-  let indexLimit = params.indexLimit ?? (lastIndex + 1n);
-  if (indexLimit > U64_MAX) indexLimit = U64_MAX;
+  console.info("###################### lastIndexFetched", lastIndexFetched);
+  const lastIndex = lastIndexFetched;
+  let indexLimit = lastIndex + 1n;
   let expiry = nowSec + BigInt(Number(params.expirySeconds || process.env.ERC8004_FEEDBACKAUTH_TTL_SEC || 3600));
   if (expiry > U64_MAX) expiry = U64_MAX;
 
+  console.info("###################### indexLimit", indexLimit);
+
+  /*
   const eip712 = {
     domain: {
       name: 'ERC8004-FeedbackAuth',
@@ -930,8 +928,11 @@ export async function requestFeedbackAuth(params: {
       taskRefHash: params.taskRef ? (ethers.keccak256(ethers.toUtf8Bytes(params.taskRef)) as `0x${string}`) : ('0x' + '00'.repeat(32)) as `0x${string}`,
     },
   };
+  */
 
   // Reuse the same signature format as signFeedbackAuth
+
+  const identityReg = await rep.getIdentityRegistry();
   const feedbackAuth = await rep.signFeedbackAuth({
     agentId,
     clientAddress: params.clientAddress as `0x${string}`,
@@ -942,5 +943,5 @@ export async function requestFeedbackAuth(params: {
     signerAddress: sp.sessionAA as `0x${string}`,
   } as any) as `0x${string}`;
 
-  return { eip712, signature: feedbackAuth, signerAddress: sp.sessionAA as `0x${string}` };
+  return { signature: feedbackAuth, signerAddress: sp.sessionAA as `0x${string}` };
 }

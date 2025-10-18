@@ -5,9 +5,11 @@ import express from "express";
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';
-import { getFeedbackDatabase } from "./agents/movie-agent/feedbackStorage.js";
 import { acceptFeedbackWithDelegation, addFeedback } from "./agents/movie-agent/agentAdapter.js";
 import { privateKeyToAccount } from 'viem/accounts';
+import { createPublicClient, http } from 'viem';
+import { reputationRegistryAbi } from "./lib/abi/reputationRegistry.js";
+import { initIdentityClient, getIdentityClient, initReputationClient, getReputationClient } from './agents/movie-agent/clientProvider.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,18 +34,65 @@ app.use((req, res, next) => {
   }
 });
 
+// Helper: resolve feedbackAuth from agent name + client address via identity registry & agent card skill
+async function resolveFeedbackAuth(params: { clientAddress: string; agentName: string; indexLimit?: number; expirySec?: number }): Promise<string> {
+  const { clientAddress, agentName } = params;
+  const indexLimit = params.indexLimit ?? 1;
+  const expiry = params.expirySec ?? Number(process.env.ERC8004_FEEDBACKAUTH_TTL_SEC || 3600);
+
+  const rpcUrl = (process.env.RPC_URL || process.env.JSON_RPC_URL || 'https://rpc.sepolia.org');
+  const pub = createPublicClient({ chain: undefined as any, transport: http(rpcUrl) });
+  const repReg = (process.env.REPUTATION_REGISTRY || process.env.ERC8004_REPUTATION_REGISTRY || '').trim();
+  if (!repReg) throw new Error('REPUTATION_REGISTRY is required to resolve identity registry');
+  const identityReg = await pub.readContract({ address: repReg as any, abi: reputationRegistryAbi as any, functionName: 'getIdentityRegistry', args: [] }) as `0x${string}`;
+  const ensRegistry = (process.env.ENS_REGISTRY || process.env.NEXT_PUBLIC_ENS_REGISTRY || '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e') as `0x${string}`;
+  initIdentityClient({ publicClient: pub as any, identityRegistry: identityReg as any, ensRegistry } as any);
+  const identity = getIdentityClient();
+  const agentUrl = await identity.getAgentUrlByName(agentName);
+  if (!agentUrl) throw new Error(`Could not resolve agent URL for ${agentName}`);
+  const idInfo = await identity.getAgentIdentityByName(agentName);
+  const agentIdResolved = idInfo?.agentId;
+  const base = agentUrl.replace(/\/+$/, '');
+  const cardResp = await fetch(`${base}/.well-known/agent-card.json`).catch(() => null);
+  if (!cardResp || !cardResp.ok) throw new Error('Failed to load agent card');
+  const card = await cardResp.json().catch(() => ({}));
+  const skills: any[] = Array.isArray(card?.skills) ? card.skills : [];
+  const hasSkill = skills.some((s: any) => s?.id === 'agent.feedback.requestAuth' || s?.name === 'agent.feedback.requestAuth');
+  if (!hasSkill) throw new Error('Agent does not advertise agent.feedback.requestAuth');
+  const a2aBase = (card?.endpoint && typeof card.endpoint === 'string') ? String(card.endpoint).replace(/\/+$/, '') : `${base}/a2a`;
+  const skillUrl = `${a2aBase}/skills/agent.feedback.requestAuth`;
+  const resp = await fetch(skillUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientAddress, ...(agentIdResolved ? { agentId: agentIdResolved.toString() } : {}), chainId: Number(process.env.ERC8004_CHAIN_ID || 11155111), indexLimit, expiry })
+  });
+  if (!resp.ok) throw new Error(`Movie agent responded with ${resp.status}`);
+  const data = await resp.json();
+  const feedbackAuthId = data?.feedbackAuthId || data?.signature || data?.feedbackAuth || null;
+  if (!feedbackAuthId) throw new Error('No feedbackAuth returned by agent');
+  return feedbackAuthId as string;
+}
+
+// Resolve agentId from agentName (ENS) via identity registry
+async function resolveAgentIdByName(agentName: string): Promise<bigint | null> {
+  const rpcUrl = (process.env.RPC_URL || process.env.JSON_RPC_URL || 'https://rpc.sepolia.org');
+  const pub = createPublicClient({ chain: undefined as any, transport: http(rpcUrl) });
+  const repReg = (process.env.REPUTATION_REGISTRY || process.env.ERC8004_REPUTATION_REGISTRY || '').trim();
+  if (!repReg) throw new Error('REPUTATION_REGISTRY is required to resolve identity registry');
+  const identityReg = await pub.readContract({ address: repReg as any, abi: reputationRegistryAbi as any, functionName: 'getIdentityRegistry', args: [] }) as `0x${string}`;
+  const ensRegistry = (process.env.ENS_REGISTRY || process.env.NEXT_PUBLIC_ENS_REGISTRY || '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e') as `0x${string}`;
+  initIdentityClient({ publicClient: pub as any, identityRegistry: identityReg as any, ensRegistry } as any);
+  const identity = getIdentityClient();
+  const info = await identity.getAgentIdentityByName(agentName);
+  return info?.agentId ?? null;
+}
+
 // Serve the main HTML page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Get default agent IDs from environment variables
-app.get('/api/config/agent-ids', (req, res) => {
-  res.json({
-    clientId: process.env.AGENT_CLIENT_ID || '12',
-    serverId: process.env.AGENT_SERVER_ID || '11'
-  });
-});
+
 
 // Get client address derived from CLIENT_PRIVATE_KEY in env
 app.get('/api/config/client-address', (req, res) => {
@@ -75,22 +124,8 @@ app.get('/.well-known/agent-card.json', (req, res) => {
 // Feedback endpoint
 app.get('/.well-known/feedback.json', (req, res) => {
   try {
-    const feedbackDb = getFeedbackDatabase();
-    const records = feedbackDb.getAllFeedback();
-    
-    // Convert database records to the format expected by other apps
-    const feedbackRecords = records.map(record => ({
-      FeedbackAuthID: record.feedbackAuthId,
-      AgentSkillId: record.agentSkillId,
-      TaskId: record.taskId,
-      contextId: record.contextId,
-      Rating: record.rating,
-      Domain: record.domain,
-      Data: { notes: record.notes },
-      ...(record.proofOfPayment && { ProofOfPayment: { txHash: record.proofOfPayment } })
-    }));
-    
-    res.json(feedbackRecords);
+    // Deprecated: local feedback storage removed. Expose empty list or migrate to on-chain source.
+    res.json([]);
   } catch (error: any) {
     console.error('[WebClient] Error serving feedback.json:', error?.message || error);
     res.json([]);
@@ -102,9 +137,8 @@ app.get('/.well-known/feedback.json', (req, res) => {
 // Get feedback statistics
 app.get('/api/feedback/stats', (req, res) => {
   try {
-    const feedbackDb = getFeedbackDatabase();
-    const stats = feedbackDb.getFeedbackStats();
-    res.json(stats);
+    // Deprecated: local stats removed. Client should compute from /api/feedback response
+    res.json({ total: 0, averageRating: 0, byDomain: {}, byRating: {} });
   } catch (error: any) {
     console.error('[WebClient] Error getting feedback stats:', error?.message || error);
     res.status(500).json({ error: error?.message || 'Internal server error' });
@@ -112,13 +146,43 @@ app.get('/api/feedback/stats', (req, res) => {
 });
 
 // Get all feedback
-app.get('/api/feedback', (req, res) => {
+app.get('/api/feedback', async (req, res) => {
   try {
-    const feedbackDb = getFeedbackDatabase();
-    const feedback = feedbackDb.getAllFeedback();
-    res.json(feedback);
+    console.info(" read all feedback from reputation client: req.query", req.query.agentName);
+    const agentName = String(req.query.agentName || '').trim();
+    if (!agentName) {
+      // No agent specified; return empty (migrated off local storage)
+      return res.json([]);
+    }
+
+    // Resolve agentId
+    const agentId = await resolveAgentIdByName(agentName);
+    if (!agentId || agentId === 0n) return res.json([]);
+
+    // Initialize reputation SDK (read-only)
+    const rpcUrl = (process.env.RPC_URL || process.env.JSON_RPC_URL || 'https://rpc.sepolia.org');
+    const pub = createPublicClient({ chain: undefined as any, transport: http(rpcUrl) });
+    const repReg = (process.env.REPUTATION_REGISTRY || process.env.ERC8004_REPUTATION_REGISTRY || '').trim();
+    if (!repReg) return res.json([]);
+    
+    await initReputationClient({ publicClient: pub as any, reputationRegistry: repReg as `0x${string}`, ensRegistry: (process.env.ENS_REGISTRY || process.env.NEXT_PUBLIC_ENS_REGISTRY || '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e') as any } as any);
+    const rep = getReputationClient() as any;
+
+    console.info(" read all feedback from reputation client: agentId", agentId);
+    const data = await rep.readAllFeedback(agentId);
+    console.info(" read all feedback from reputation client: data", data);
+    const scores: number[] = (data?.scores || []).map((n: any) => Number(n));
+    const list = scores.map((score: number, i: number) => ({
+      id: i + 1,
+      domain: agentName,
+      rating: score,
+      notes: '',
+      createdAt: new Date().toISOString(),
+      feedbackAuthId: '',
+    }));
+    res.json(list);
   } catch (error: any) {
-    console.error('[WebClient] Error getting feedback:', error?.message || error);
+    console.error('[WebClient] Error getting on-chain feedback:', error?.message || error);
     res.status(500).json({ error: error?.message || 'Internal server error' });
   }
 });
@@ -126,7 +190,7 @@ app.get('/api/feedback', (req, res) => {
 // Add feedback
 app.post('/api/feedback', async (req, res) => {
   try {
-    const { rating, comment, agentId, domain, taskId, contextId, isReserve, proofOfPayment } = req.body;
+    const { rating, comment, agentId, domain, taskId, contextId, isReserve, proofOfPayment, agentName, feedbackAuthId: feedbackAuthFromClient } = req.body;
     
     if (!rating || !comment) {
       return res.status(400).json({ error: 'Rating and comment are required' });
@@ -136,15 +200,40 @@ app.post('/api/feedback', async (req, res) => {
       return res.status(400).json({ error: 'Rating must be between 1 and 5' });
     }
     
-    const result = await addFeedback({
+    // Resolve feedbackAuth if client provided agentName but no feedbackAuth
+    let finalFeedbackAuthId = feedbackAuthFromClient || '';
+    if (!finalFeedbackAuthId && agentName) {
+      const clientPrivateKey = (process.env.CLIENT_PRIVATE_KEY || '').trim() as `0x${string}`;
+      if (!clientPrivateKey || !clientPrivateKey.startsWith('0x')) {
+        throw new Error('CLIENT_PRIVATE_KEY not set or invalid. Please set a 0x-prefixed 32-byte hex in .env');
+      }
+      const clientAccount = privateKeyToAccount(clientPrivateKey);
+      finalFeedbackAuthId = await resolveFeedbackAuth({ clientAddress: clientAccount.address, agentName });
+    }
+
+    console.info("----------> add feedback for agentName", agentName);
+    console.info("----------> add feedback for finalFeedbackAuthId", finalFeedbackAuthId);
+
+  // Compute final agentId/domain if not provided
+  let finalAgentId: bigint | undefined = undefined;
+  if (agentId) {
+    try { finalAgentId = BigInt(agentId); } catch {}
+  } else if (agentName) {
+    const resolvedId = await resolveAgentIdByName(agentName);
+    if (resolvedId && resolvedId > 0n) finalAgentId = resolvedId;
+  }
+  const finalDomain = domain || agentName || undefined;
+
+  const result = await addFeedback({
       rating: parseInt(rating),
       comment,
-      ...(agentId && { agentId: BigInt(agentId) }),
-      ...(domain && { domain }),
+    ...(finalAgentId !== undefined && { agentId: finalAgentId }),
+    ...(finalDomain && { domain: finalDomain }),
       ...(taskId && { taskId }),
       ...(contextId && { contextId }),
       ...(isReserve !== undefined && { isReserve }),
-      ...(proofOfPayment && { proofOfPayment })
+      ...(proofOfPayment && { proofOfPayment }),
+      ...(finalFeedbackAuthId && { feedbackAuthId: finalFeedbackAuthId })
     });
     
     res.json(result);
@@ -160,8 +249,12 @@ app.post('/api/feedback', async (req, res) => {
 app.get('/api/feedback/accept', async (req, res) => {
   try {
     const agentName = String(req.query.agentName || '').trim();
+    const feedbackAuth = String(req.query.feedbackAuth || '').trim() as `0x${string}`;
     if (!agentName) {
       return res.status(400).json({ error: 'agentName is required' });
+    }
+    if (!feedbackAuth || !feedbackAuth.startsWith('0x')) {
+      return res.status(400).json({ error: 'feedbackAuth is required' });
     }
 
     const clientPrivateKey = (process.env.CLIENT_PRIVATE_KEY || '').trim() as `0x${string}`;
@@ -172,9 +265,11 @@ app.get('/api/feedback/accept', async (req, res) => {
 
     console.info("*************** clientAccount", clientAccount); 
     console.info("*************** agentName", agentName);
+    console.info("*************** feedbackAuth", feedbackAuth);
     const result = await acceptFeedbackWithDelegation({
       clientAccount,
-      agentName
+      agentName,
+      feedbackAuth: feedbackAuth as `0x${string}`
     });
     
     res.json({ result });
@@ -195,25 +290,7 @@ app.get('/api/feedback-auth', async (req, res) => {
     if (!agentName) {
       return res.status(400).json({ error: 'agentName is required' });
     }
-
-    const movieAgentUrl = process.env.MOVIE_AGENT_URL || 'http://localhost:41241';
-    // Prefer the new A2A skill endpoint when agentName provided
-    let resp: any;
-    if (agentName) {
-      resp = await fetch(`${movieAgentUrl.replace(/\/+$/, '')}/a2a/skills/agent.feedback.requestAuth`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientAddress, agentId: process.env.AGENT_SERVER_ID || undefined, chainId: Number(process.env.ERC8004_CHAIN_ID || 11155111), indexLimit: 1, expiry: Number(process.env.ERC8004_FEEDBACKAUTH_TTL_SEC || 3600) })
-      });
-    } else {
-      resp = await fetch(`${movieAgentUrl.replace(/\/+$/, '')}/api/feedback-auth/${clientAddress}`);
-    }
-    if (!resp.ok) {
-      throw new Error(`Movie agent responded with ${resp.status}`);
-    }
-    const data = await resp.json();
-    // Support both legacy and new responses
-    const feedbackAuthId = data?.feedbackAuthId || data?.signature || data?.feedbackAuth || null;
+    const feedbackAuthId = await resolveFeedbackAuth({ clientAddress, agentName, indexLimit: 1, expirySec: Number(process.env.ERC8004_FEEDBACKAUTH_TTL_SEC || 3600) });
     res.json({ feedbackAuthId });
   } catch (error: any) {
     console.error('[WebClient] Error getting feedback auth ID:', error?.message || error);
@@ -248,6 +325,33 @@ app.get('/api/movie-agent/status', async (req, res) => {
       error: error?.message || 'Connection failed',
       url: process.env.MOVIE_AGENT_URL || 'http://localhost:41241'
     });
+  }
+});
+
+// Get on-chain reputation summary for an agent by name
+app.get('/api/reputation/summary', async (req, res) => {
+  try {
+    const agentName = String(req.query.agentName || '').trim();
+    if (!agentName) return res.status(400).json({ error: 'agentName is required' });
+
+    // Resolve agentId
+    const agentId = await resolveAgentIdByName(agentName);
+    if (!agentId || agentId === 0n) return res.status(404).json({ error: 'Agent not found' });
+
+    // Build public client and init reputation SDK
+    const rpcUrl = (process.env.RPC_URL || process.env.JSON_RPC_URL || 'https://rpc.sepolia.org');
+    const pub = createPublicClient({ chain: undefined as any, transport: http(rpcUrl) });
+    const repReg = (process.env.REPUTATION_REGISTRY || process.env.ERC8004_REPUTATION_REGISTRY || '').trim();
+    if (!repReg) return res.status(500).json({ error: 'REPUTATION_REGISTRY is not configured' });
+    await initReputationClient({ publicClient: pub as any, reputationRegistry: repReg as `0x${string}`, ensRegistry: (process.env.ENS_REGISTRY || process.env.NEXT_PUBLIC_ENS_REGISTRY || '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e') as any } as any);
+    const rep = getReputationClient() as any;
+    const summary = await rep.getSummary(agentId);
+    const count = BigInt(summary?.count ?? 0n);
+    const averageScore = Number(summary?.averageScore ?? 0);
+    res.json({ agentId: agentId.toString(), count: count.toString(), averageScore });
+  } catch (error: any) {
+    console.error('[WebClient] Error getting reputation summary:', error?.message || error);
+    res.status(500).json({ error: error?.message || 'Internal server error' });
   }
 });
 

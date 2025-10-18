@@ -20,7 +20,7 @@ import {
 } from "@a2a-js/sdk";
 import { A2AClient } from "@a2a-js/sdk/client";
 import { addFeedback } from "./agents/movie-agent/agentAdapter.js";
-import { getFeedbackDatabase } from "./agents/movie-agent/feedbackStorage.js";
+
 
 // --- ANSI Colors ---
 const colors = {
@@ -269,13 +269,7 @@ async function main() {
         return;
       }
       
-      try {
 
-        
-        console.log(colorize("green", `Feedback accepted! UserOp Hash: ${userOpHash}`));
-      } catch (error: any) {
-        console.log(colorize("red", `Error: ${error?.message || error}`));
-      }
       
       rl.prompt();
       return;
@@ -318,7 +312,6 @@ async function main() {
         });
         
         if (result.status === 'ok') {
-          console.log(colorize("green", `Feedback added successfully! ID: ${result.feedbackId}`));
           console.log(colorize("green", `  Agent ID: ${result.agentId}`));
           console.log(colorize("green", `  Domain: ${result.domain}`));
         } else {
@@ -334,27 +327,7 @@ async function main() {
 
     // Handle /list-feedback command
     if (input.toLowerCase().startsWith("/list-feedback")) {
-      try {
-        const feedbackDb = getFeedbackDatabase();
-        const allFeedback = await feedbackDb.getAllFeedback();
-        
-        if (allFeedback.length === 0) {
-          console.log(colorize("yellow", "No feedback records found"));
-        } else {
-          console.log(colorize("cyan", `Found ${allFeedback.length} feedback records:`));
-          allFeedback.forEach((record, index) => {
-            console.log(colorize("bright", `${index + 1}. ID: ${record.id}`));
-            console.log(`   Domain: ${record.domain}`);
-            console.log(`   Rating: ${record.rating}% (${record.rating / 20}/5 stars)`);
-            console.log(`   Notes: ${record.notes}`);
-            console.log(`   Created: ${record.createdAt}`);
-            console.log(`   Auth ID: ${record.feedbackAuthId}`);
-            console.log("");
-          });
-        }
-      } catch (error: any) {
-        console.log(colorize("red", `Error: ${error?.message || error}`));
-      }
+      
       
       rl.prompt();
       return;
@@ -362,31 +335,7 @@ async function main() {
 
     // Handle /feedback-stats command
     if (input.toLowerCase().startsWith("/feedback-stats")) {
-      try {
-        const feedbackDb = getFeedbackDatabase();
-        const stats = await feedbackDb.getFeedbackStats();
-        
-        console.log(colorize("cyan", "Feedback Statistics:"));
-        console.log(`Total feedback records: ${stats.total}`);
-        console.log(`Average rating: ${stats.averageRating.toFixed(1)}% (${(stats.averageRating / 20).toFixed(1)}/5 stars)`);
-        
-        if (Object.keys(stats.byDomain).length > 0) {
-          console.log(colorize("bright", "\nBy Domain:"));
-          Object.entries(stats.byDomain).forEach(([domain, count]) => {
-            console.log(`  ${domain}: ${count} records`);
-          });
-        }
-        
-        if (Object.keys(stats.byRating).length > 0) {
-          console.log(colorize("bright", "\nBy Rating:"));
-          Object.entries(stats.byRating).forEach(([rating, count]) => {
-            const stars = parseInt(rating) / 20;
-            console.log(`  ${stars}/5 stars (${rating}%): ${count} records`);
-          });
-        }
-      } catch (error: any) {
-        console.log(colorize("red", `Error: ${error?.message || error}`));
-      }
+      
       
       rl.prompt();
       return;
