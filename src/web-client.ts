@@ -10,6 +10,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { createPublicClient, http } from 'viem';
 import { reputationRegistryAbi } from "./lib/abi/reputationRegistry.js";
 import { initIdentityClient, getIdentityClient, initReputationClient, getReputationClient } from './agents/movie-agent/clientProvider.js';
+import IpfsService from './services/ipfs.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -159,28 +160,54 @@ app.get('/api/feedback', async (req, res) => {
     const agentId = await resolveAgentIdByName(agentName);
     if (!agentId || agentId === 0n) return res.json([]);
 
-    // Initialize reputation SDK (read-only)
-    const rpcUrl = (process.env.RPC_URL || process.env.JSON_RPC_URL || 'https://rpc.sepolia.org');
-    const pub = createPublicClient({ chain: undefined as any, transport: http(rpcUrl) });
-    const repReg = (process.env.REPUTATION_REGISTRY || process.env.ERC8004_REPUTATION_REGISTRY || '').trim();
-    if (!repReg) return res.json([]);
-    
-    await initReputationClient({ publicClient: pub as any, reputationRegistry: repReg as `0x${string}`, ensRegistry: (process.env.ENS_REGISTRY || process.env.NEXT_PUBLIC_ENS_REGISTRY || '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e') as any } as any);
-    const rep = getReputationClient() as any;
+    // GraphQL-driven feedback fetch
+    const GRAPHQL_URL = String(process.env.REPUTATION_GRAPHQL_URL || process.env.GRAPHQL_URL || '').trim();
+    if (!GRAPHQL_URL) {
+      console.warn('GRAPHQL_URL not configured; returning empty feedback list');
+      return res.json([]);
+    }
 
-    console.info(" read all feedback from reputation client: agentId", agentId);
-    const data = await rep.readAllFeedback(agentId);
-    console.info(" read all feedback from reputation client: data", data);
-    const scores: number[] = (data?.scores || []).map((n: any) => Number(n));
-    const list = scores.map((score: number, i: number) => ({
-      id: i + 1,
-      domain: agentName,
-      rating: score,
-      notes: '',
-      createdAt: new Date().toISOString(),
-      feedbackAuthId: '',
+    const query = `query Feedbacks($first: Int!, $agentId: String!) {\n      repFeedbacks(first: $first, orderBy: timestamp, orderDirection: desc, where: { agentId: $agentId }) {\n        id\n        agentId\n        clientAddress\n        score\n        tag1\n        tag2\n        feedbackUri\n        feedbackHash\n        txHash\n        blockNumber\n        timestamp\n      }\n    }`;
+
+    const fetchJson = async (body: any) => {
+      const endpoint = GRAPHQL_URL.replace(/\/graphql\/?$/i, '');
+      const resp = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json', 'accept': 'application/json' }, body: JSON.stringify(body) } as any);
+      if (!resp.ok) {
+        let text = '';
+        try { text = await resp.text(); } catch {}
+        throw new Error(`GraphQL ${resp.status}: ${text || resp.statusText}`);
+      }
+      return await resp.json();
+    };
+
+    const first = Number(process.env.FEEDBACK_QUERY_LIMIT || 50);
+    const respGql = await fetchJson({ query, variables: { first, agentId: agentId.toString() } });
+    const rows: any[] = respGql?.data?.repFeedbacks || [];
+
+    const enrichedList = await Promise.all(rows.map(async (row: any, i: number) => {
+      const score = Number(row?.score ?? 0);
+      const feedbackUriRaw = String(row?.feedbackUri || '').trim();
+      let notes = '';
+      if (feedbackUriRaw) {
+        try {
+          const m = feedbackUriRaw.match(/(?:ipfs:\/\/|\/ipfs\/)([^/?#]+)/);
+          const cid = m ? m[1] : feedbackUriRaw;
+          const json = await IpfsService.downloadJson(cid);
+          const obj = (json as any) || {};
+          notes = String(obj?.comment || obj?.comments || obj?.note || '');
+        } catch {}
+      }
+      return {
+        id: i + 1,
+        domain: agentName,
+        rating: score,
+        notes,
+        createdAt: new Date().toISOString(),
+        feedbackAuthId: '',
+      };
     }));
-    res.json(list);
+
+    res.json(enrichedList);
   } catch (error: any) {
     console.error('[WebClient] Error getting on-chain feedback:', error?.message || error);
     res.status(500).json({ error: error?.message || 'Internal server error' });

@@ -24,6 +24,7 @@ import {
 import { sepolia } from "viem/chains";
 
 import { ethers } from 'ethers';
+import IpfsService from '../../services/ipfs.js';
 
 
 
@@ -630,6 +631,21 @@ export async function addFeedback(params: {
     const finalFeedbackAuthId = feedbackAuthId || '';
     let onChainTxHash: `0x${string}` | undefined = undefined;
 
+  // Build feedback metadata and upload to IPFS to obtain feedbackUri
+  let feedbackUri = '';
+  try {
+    const feedbackMeta = {
+      type: 'https://eips.ethereum.org/EIPS/eip-8004#feedback-v1',
+      agentId: agentId?.toString?.() || '',
+      domain,
+      ratingPct: Math.max(0, Math.min(100, rating * 20)),
+      comment,
+      timestamp: new Date().toISOString(),
+    } as any;
+    const uploaded = await IpfsService.uploadJson({ data: feedbackMeta, filename: `feedback_${Date.now()}.json` });
+    feedbackUri = uploaded.url;
+  } catch {}
+
     // If we have a feedbackAuth and agentId, attempt on-chain submission via Reputation SDK
     if (finalFeedbackAuthId && agentId && agentId > 0n) {
       try {
@@ -658,12 +674,15 @@ export async function addFeedback(params: {
         const rep = getReputationClient();
         const zeroBytes32 = '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`;
         const ratingPctForChain = Math.max(0, Math.min(100, rating * 20));
+
+        console.info(" feedbackUri", feedbackUri);
+        
         const { txHash } = await rep.giveClientFeedback({
           agentId,
           score: ratingPctForChain,
           tag1: zeroBytes32 as any,
           tag2: zeroBytes32 as any,
-          feedbackUri: '',
+          feedbackUri,
           feedbackHash: zeroBytes32 as any,
           feedbackAuth: finalFeedbackAuthId as `0x${string}`,
         } as any);
