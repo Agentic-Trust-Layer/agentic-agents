@@ -197,12 +197,24 @@ app.get('/api/feedback-auth', async (req, res) => {
     }
 
     const movieAgentUrl = process.env.MOVIE_AGENT_URL || 'http://localhost:41241';
-    const resp = await fetch(`${movieAgentUrl.replace(/\/+$/, '')}/api/feedback-auth/${clientAddress}`);
+    // Prefer the new A2A skill endpoint when agentName provided
+    let resp: any;
+    if (agentName) {
+      resp = await fetch(`${movieAgentUrl.replace(/\/+$/, '')}/a2a/skills/agent.feedback.requestAuth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientAddress, agentId: process.env.AGENT_SERVER_ID || undefined, chainId: Number(process.env.ERC8004_CHAIN_ID || 11155111), indexLimit: 1, expiry: Number(process.env.ERC8004_FEEDBACKAUTH_TTL_SEC || 3600) })
+      });
+    } else {
+      resp = await fetch(`${movieAgentUrl.replace(/\/+$/, '')}/api/feedback-auth/${clientAddress}`);
+    }
     if (!resp.ok) {
       throw new Error(`Movie agent responded with ${resp.status}`);
     }
     const data = await resp.json();
-    res.json({ feedbackAuthId: data.feedbackAuthId });
+    // Support both legacy and new responses
+    const feedbackAuthId = data?.feedbackAuthId || data?.signature || data?.feedbackAuth || null;
+    res.json({ feedbackAuthId });
   } catch (error: any) {
     console.error('[WebClient] Error getting feedback auth ID:', error?.message || error);
     res.status(500).json({ error: error?.message || 'Internal server error' });

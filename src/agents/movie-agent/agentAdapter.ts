@@ -854,3 +854,93 @@ export async function getFeedbackAuthId(params: {
 }
 
 
+// Skill implementation: agent.feedback.requestAuth
+export async function requestFeedbackAuth(params: {
+  agentId?: bigint;
+  clientAddress: `0x${string}`;
+  taskRef?: string; // optional external binding
+  chainId?: number;
+  indexLimit?: bigint;
+  expirySeconds?: number;
+}): Promise<{ eip712: any; signature: `0x${string}`; signerAddress: `0x${string}` }> {
+  const sp = buildDelegationSetup();
+  const agentId = params.agentId || BigInt(sp.agentId);
+
+  const walletClient = createWalletClient({ chain: sepolia, transport: http(sp.rpcUrl) }) as any;
+  const publicClient = createPublicClient({ chain: sepolia, transport: http(sp.rpcUrl) });
+  const identityReg = await fetchIdentityRegistry(publicClient as any, sp.reputationRegistry as `0x${string}`);
+
+  // signer: agent owner/operator derived from session key
+  const ownerEOA = privateKeyToAccount(sp.sessionKey.privateKey);
+  const signerSmartAccount = await toMetaMaskSmartAccount({
+    client: publicClient,
+    chain: sepolia,
+    implementation: Implementation.Hybrid,
+    address: sp.sessionAA as `0x${string}`,
+    signatory: { account: ownerEOA as any },
+  } as any);
+
+  initReputationClient({
+    publicClient: publicClient as any,
+    walletClient: walletClient as any,
+    agentAccount: (signerSmartAccount) as any,
+    reputationRegistry: sp.reputationRegistry as `0x${string}`,
+    identityRegistry: identityReg as any,
+  } as any);
+  const rep = getReputationClient();
+
+  const nowSec = BigInt(Math.floor(Date.now() / 1000));
+  const chainId = BigInt(publicClient.chain?.id ?? 0);
+  const U64_MAX = 18446744073709551615n;
+
+  const lastIndexFetched = await rep.getLastIndex(BigInt(agentId), params.clientAddress);
+  const lastIndex = lastIndexFetched > U64_MAX ? U64_MAX : lastIndexFetched;
+  let indexLimit = params.indexLimit ?? (lastIndex + 1n);
+  if (indexLimit > U64_MAX) indexLimit = U64_MAX;
+  let expiry = nowSec + BigInt(Number(params.expirySeconds || process.env.ERC8004_FEEDBACKAUTH_TTL_SEC || 3600));
+  if (expiry > U64_MAX) expiry = U64_MAX;
+
+  const eip712 = {
+    domain: {
+      name: 'ERC8004-FeedbackAuth',
+      version: '1',
+      chainId: Number(chainId),
+      verifyingContract: identityReg,
+    },
+    types: {
+      FeedbackAuth: [
+        { name: 'agentId', type: 'uint256' },
+        { name: 'clientAddress', type: 'address' },
+        { name: 'indexLimit', type: 'uint256' },
+        { name: 'expiry', type: 'uint256' },
+        { name: 'chainId', type: 'uint256' },
+        { name: 'identityRegistry', type: 'address' },
+        { name: 'signerAddress', type: 'address' },
+        { name: 'taskRefHash', type: 'bytes32' },
+      ],
+    },
+    message: {
+      agentId: agentId.toString(),
+      clientAddress: params.clientAddress,
+      indexLimit: indexLimit.toString(),
+      expiry: expiry.toString(),
+      chainId: chainId.toString(),
+      identityRegistry: identityReg,
+      signerAddress: sp.sessionAA as `0x${string}`,
+      taskRefHash: params.taskRef ? (ethers.keccak256(ethers.toUtf8Bytes(params.taskRef)) as `0x${string}`) : ('0x' + '00'.repeat(32)) as `0x${string}`,
+    },
+  };
+
+  // Reuse the same signature format as signFeedbackAuth
+  const feedbackAuth = await rep.signFeedbackAuth({
+    agentId,
+    clientAddress: params.clientAddress as `0x${string}`,
+    indexLimit,
+    expiry,
+    chainId,
+    identityRegistry: identityReg as `0x${string}`,
+    signerAddress: sp.sessionAA as `0x${string}`,
+  } as any) as `0x${string}`;
+
+  return { eip712, signature: feedbackAuth, signerAddress: sp.sessionAA as `0x${string}` };
+}

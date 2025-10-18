@@ -25,7 +25,7 @@ import {
   DefaultRequestHandler,
 } from "@a2a-js/sdk/server";
 import { openAiToolDefinitions, openAiToolHandlers } from "./tools.js";
-import { giveFeedbackWithDelegation, getFeedbackAuthId as serverGetFeedbackAuthId } from './agentAdapter.js';
+import { giveFeedbackWithDelegation, getFeedbackAuthId as serverGetFeedbackAuthId, requestFeedbackAuth } from './agentAdapter.js';
 import { buildDelegationSetup } from './session.js';
 
 if (!process.env.OPENAI_API_KEY || !process.env.TMDB_API_KEY) {
@@ -369,6 +369,17 @@ const movieAgentCard: AgentCard = {
       inputModes: ['text'], // Explicitly defining for skill
       outputModes: ['text', 'task-status'] // Explicitly defining for skill
     },
+    {
+      id: 'agent.feedback.requestAuth',
+      name: 'agent.feedback.requestAuth',
+      description: 'Issue a signed ERC-8004 feedbackAuth for a client to submit feedback',
+      tags: ['erc8004', 'feedback', 'auth', 'a2a'],
+      examples: [
+        'Client requests feedbackAuth after receiving results',
+      ],
+      inputModes: ['text'],
+      outputModes: ['text']
+    },
   ],
   supportsAuthenticatedExtendedCard: false,
 };
@@ -378,10 +389,10 @@ async function main() {
   try {
     console.info('***************  attempt to submit feedback via delegation (expect giveFeedback event) on startup')
 
-    const sp = buildDelegationSetup();
-    const agentId = sp.agentId;
+    //const sp = buildDelegationSetup();
+    //const agentId = sp.agentId;
 
-    await giveFeedbackWithDelegation({});
+    //await giveFeedbackWithDelegation({});
 
   } catch (err: any) {
     console.warn('[MovieAgent] giveFeedbackWithDelegation skipped:', err?.message || err);
@@ -439,6 +450,27 @@ async function main() {
       res.json({ feedbackAuthId });
     } catch (error: any) {
       console.error('[MovieAgent] Error getting feedback auth ID:', error?.message || error);
+      res.status(500).json({ error: error?.message || 'Internal server error' });
+    }
+  });
+
+  // 4.6. Add A2A skill HTTP shim: agent.feedback.requestAuth
+  // POST /a2a/skills/agent.feedback.requestAuth
+  expressApp.post('/a2a/skills/agent.feedback.requestAuth', async (req: any, res: any) => {
+    try {
+      const { agentId, clientAddress, taskRef, chainId, expiry, indexLimit } = req.body || {};
+      if (!clientAddress) return res.status(400).json({ error: 'clientAddress required' });
+      const result = await requestFeedbackAuth({
+        agentId: agentId ? BigInt(agentId) : undefined,
+        clientAddress,
+        taskRef,
+        chainId,
+        expirySeconds: expiry,
+        indexLimit: indexLimit ? BigInt(indexLimit) : undefined,
+      });
+      res.json(result);
+    } catch (error: any) {
+      console.error('[MovieAgent] requestAuth error:', error?.message || error);
       res.status(500).json({ error: error?.message || 'Internal server error' });
     }
   });
