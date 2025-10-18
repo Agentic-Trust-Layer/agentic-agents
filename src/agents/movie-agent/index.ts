@@ -25,7 +25,7 @@ import {
   DefaultRequestHandler,
 } from "@a2a-js/sdk/server";
 import { openAiToolDefinitions, openAiToolHandlers } from "./tools.js";
-import { giveFeedbackWithDelegation } from './agentAdapter.js';
+import { giveFeedbackWithDelegation, getFeedbackAuthId as serverGetFeedbackAuthId } from './agentAdapter.js';
 import { buildDelegationSetup } from './session.js';
 
 if (!process.env.OPENAI_API_KEY || !process.env.TMDB_API_KEY) {
@@ -427,6 +427,19 @@ async function main() {
     } catch (error) {
       console.error('Error serving agent card:', error);
       res.status(500).json({ error: 'Failed to load agent card' });
+    }
+  });
+
+  // 4.6. Add feedback auth endpoint
+  console.info("*************** add feedback auth endpoint");
+  expressApp.get('/api/feedback-auth/:clientAddress', async (req: any, res: any) => {
+    try {
+      const { clientAddress } = req.params;
+      const feedbackAuthId = await serverGetFeedbackAuthId({ clientAddress });
+      res.json({ feedbackAuthId });
+    } catch (error: any) {
+      console.error('[MovieAgent] Error getting feedback auth ID:', error?.message || error);
+      res.status(500).json({ error: error?.message || 'Internal server error' });
     }
   });
 

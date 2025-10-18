@@ -1,6 +1,6 @@
-import { createPublicClient, createWalletClient, custom, http, defineChain, encodeFunctionData, encodeAbiParameters, keccak256, isHex, hexToBytes, sliceHex, zeroAddress, toHex, type Address, type Chain, type PublicClient, type Account } from "viem";
+import { createPublicClient, createWalletClient, custom, http, defineChain, encodeFunctionData, encodeAbiParameters, keccak256, isHex, hexToBytes, sliceHex, zeroAddress, toHex, getAddress, type Address, type Chain, type PublicClient, type Account } from "viem";
 import { identityRegistryAbi } from "../../lib/abi/identityRegistry.js";
-import { initReputationClient, getReputationClient } from './reputationClientProvider.js';
+import { initReputationClient, getReputationClient, initIdentityClient, getIdentityClient } from './clientProvider.js';
 import { reputationRegistryAbi } from "../../lib/abi/reputationRegistry.js";
 import { createBundlerClient, createPaymasterClient } from 'viem/account-abstraction';
 import { buildDelegationSetup } from './session.js';
@@ -92,7 +92,7 @@ export async function createFeedbackAuth(params: {
 
     console.info('IdentityRegistry approvals:', { ownerOfAgent, isOperator, tokenApproved });
     if (!isOperator && tokenApproved.toLowerCase() !== (signer.address as string).toLowerCase()) {
-      throw new Error(`IdentityRegistry approval missing: neither isApprovedForAll(owner=${ownerOfAgent}, operator=${sp.sessionAA}) nor getApproved(${agentId}) == ${sp.sessionAA}`);
+      throw new Error(`IdentityRegistry approval missing: neither isApprovedForAll`);
     }
   } catch (e: any) {
     console.warn('[IdentityRegistry] approval check failed:', e?.message || e);
@@ -585,7 +585,7 @@ export async function giveFeedbackWithDelegation(params: {
     identityRegistry: identityReg as any,
   } as any);
 
-  console.info("*************** giveFeedback with delegation yyy");
+  console.info("*************** giveFeedback with delegation yyy 1");
   const rep = getReputationClient();
   const { txHash } = await rep.giveClientFeedback({
     agentId,
@@ -596,7 +596,7 @@ export async function giveFeedbackWithDelegation(params: {
     feedbackHash,
     feedbackAuth,
   } as any);
-  console.info("*************** giveFeedback with delegation - done");
+  console.info("*************** giveFeedback with delegation - done 1");
 
   const receiptClient = createPublicClient({ chain: sepolia, transport: http(sp.rpcUrl) });
   const receipt = await receiptClient.waitForTransactionReceipt({ hash: txHash as `0x${string}` });
@@ -684,6 +684,173 @@ export async function addFeedback(params: {
       comment
     };
   }
+}
+
+
+
+/* this will always run on client application */
+export async function acceptFeedbackWithDelegation(params: {
+  clientAccount: any;
+  agentName: string;
+}): Promise<string> {
+  const { clientAccount, agentName } = params;
+
+
+  const rpcUrl = (process.env.RPC_URL || process.env.JSON_RPC_URL || 'https://rpc.sepolia.org');
+  const wal = createWalletClient({ chain: sepolia, transport: http(rpcUrl) }) as any;
+  const pub = createPublicClient({ chain: sepolia, transport: http(rpcUrl) });
+
+  const repRegRaw = (process.env.REPUTATION_REGISTRY || '').trim();
+  if (!repRegRaw) {
+    throw new Error('REPUTATION_REGISTRY env var is required to accept feedback');
+  }
+  let reputationRegistry: `0x${string}`;
+  try {
+    // Normalize to standard EIP-55 checksum (chain-agnostic) so viem validation passes
+    reputationRegistry = getAddress(repRegRaw as `0x${string}`) as `0x${string}`;
+  } catch (e: any) {
+    throw new Error(`Invalid REPUTATION_REGISTRY address: ${repRegRaw}`);
+  }
+  console.info("*************** reputationRegistry", reputationRegistry);
+  const identityReg = await fetchIdentityRegistry(pub as any, reputationRegistry);
+  console.info("*************** identityReg", identityReg);
+
+  // Initialize identity client to resolve agent info by name
+  const ensRegistry = (process.env.ENS_REGISTRY || process.env.NEXT_PUBLIC_ENS_REGISTRY || '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e') as `0x${string}`;
+  initIdentityClient({
+    publicClient: pub as any,
+    walletClient: wal as any,
+    agentAccount: clientAccount as any,
+    identityRegistry: identityReg as any,
+    ensRegistry,
+  } as any);
+  const identity = getIdentityClient();
+  const resolved = await identity.getAgentIdentityByName(agentName);
+  const agentId = resolved.agentId || 0n;
+  if (!agentId || agentId === 0n) {
+    throw new Error(`Agent not found for name: ${agentName}`);
+  }
+
+  // get feedback auth from server
+  const clientAddress = (clientAccount?.address || clientAccount?.account?.address) as `0x${string}`;
+  if (!clientAddress) {
+    throw new Error('clientAccount.address is required to fetch feedback auth');
+  }
+  let movieAgentUrl = process.env.MOVIE_AGENT_URL || null;
+  if (!movieAgentUrl) {
+    movieAgentUrl = (await identity.getAgentUrlByName(agentName)) || 'http://localhost:41241';
+  }
+  const baseUrl = String(movieAgentUrl).replace(/\/+$/, '');
+  const resp = await fetch(`${baseUrl}/api/feedback-auth/${clientAddress}`);
+  if (!resp.ok) {
+    throw new Error(`Failed to fetch feedback auth from agent (${resp.status})`);
+  }
+  const json = await resp.json().catch(() => ({}));
+  const feedbackAuth = (json?.feedbackAuthId || json?.feedbackAuth || '0x') as `0x${string}`;
+  if (!feedbackAuth || feedbackAuth === '0x') {
+    throw new Error('Agent returned empty feedbackAuth');
+  }
+
+  // add feedback to reputation registry
+  initReputationClient({
+    publicClient: pub as any,
+    walletClient: wal as any,
+    clientAccount: (clientAccount) as any,
+    reputationRegistry: reputationRegistry as `0x${string}`,
+    identityRegistry: identityReg as any,
+    ensRegistry,
+  } as any);
+
+  // feedbackAuth fetched above from server
+
+  console.info("*************** giveFeedback with delegation yyy 2");
+  const rep = getReputationClient();
+  const { txHash } = await rep.giveClientFeedback({
+    agentId,
+    score: 100,
+    tag1: '',
+    tag2: '',
+    feedbackUri: '',
+    feedbackHash: '',
+    feedbackAuth,
+  } as any);
+  console.info("*************** giveFeedback with delegation - done 2");
+
+  return "success"
+}
+
+
+/* this will always run on server application */
+export async function getFeedbackAuthId(params: {
+  clientAddress: string;
+}): Promise<string | null> {
+
+  const { clientAddress } = params;
+
+
+  const sp = buildDelegationSetup();
+  const agentId = sp.agentId;
+  
+  let feedbackAuth = ('0x') as `0x${string}`;
+
+
+  const walletClient = createWalletClient({ chain: sepolia, transport: http(sp.rpcUrl) }) as any;
+  const publicClient = createPublicClient({ chain: sepolia, transport: http(sp.rpcUrl) });
+
+  const identityReg = await fetchIdentityRegistry(publicClient as any, sp.reputationRegistry as `0x${string}`);
+  
+
+  // signer: agent owner/operator derived from session key
+  const ownerEOA = privateKeyToAccount(sp.sessionKey.privateKey);
+  
+  const signerSmartAccount = await toMetaMaskSmartAccount({
+    client: publicClient,
+    chain: sepolia,
+    implementation: Implementation.Hybrid,
+    address: sp.sessionAA as `0x${string}`,
+    signatory: { account: ownerEOA as any },
+  } as any);
+
+
+  initReputationClient({
+    publicClient: publicClient as any,
+    walletClient: walletClient as any,
+    agentAccount: (signerSmartAccount) as any,
+    reputationRegistry: sp.reputationRegistry as `0x${string}`,
+    identityRegistry: identityReg as any,
+  } as any);
+
+  const rep = getReputationClient();
+
+  const nowSec = BigInt(Math.floor(Date.now() / 1000));
+  const chainId = BigInt(publicClient.chain?.id ?? 0);
+  const U64_MAX = 18446744073709551615n;
+
+  const lastIndexFetched = await rep.getLastIndex(BigInt(agentId), clientAddress);
+  const lastIndex = lastIndexFetched > U64_MAX ? U64_MAX : lastIndexFetched;
+  let indexLimit = (lastIndex + 1n);
+  if (indexLimit > U64_MAX) {
+    console.warn('[FeedbackAuth] Computed indexLimit exceeds uint64; clamping to max');
+    indexLimit = U64_MAX;
+  }
+  let expiry = nowSec + BigInt(Number(process.env.ERC8004_FEEDBACKAUTH_TTL_SEC || 3600));
+  if (expiry > U64_MAX) {
+    console.warn('[FeedbackAuth] Computed expiry exceeds uint64; clamping to max');
+    expiry = U64_MAX;
+  }
+
+  feedbackAuth = await rep.signFeedbackAuth({
+    agentId,
+    clientAddress: clientAddress as `0x${string}`,
+    indexLimit: indexLimit,
+    expiry: expiry,
+    chainId: chainId,
+    identityRegistry: identityReg as `0x${string}`,
+    signerAddress: sp.sessionAA as `0x${string}`,
+  }) as `0x${string}`;
+    
+  return feedbackAuth
+  
 }
 
 

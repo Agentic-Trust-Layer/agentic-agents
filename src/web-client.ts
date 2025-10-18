@@ -6,13 +6,14 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';
 import { getFeedbackDatabase } from "./agents/movie-agent/feedbackStorage.js";
-import { getFeedbackAuthId, acceptFeedbackWithDelegation, addFeedback } from "./agents/movie-agent/agentAdapter.js";
+import { acceptFeedbackWithDelegation, addFeedback } from "./agents/movie-agent/agentAdapter.js";
+import { privateKeyToAccount } from 'viem/accounts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.WEB_CLIENT_PORT || 3001;
+const PORT = Number(process.env.WEB_CLIENT_PORT) || 3001;
 const HOST = process.env.HOST || 'localhost';
 
 // Middleware
@@ -138,37 +139,30 @@ app.post('/api/feedback', async (req, res) => {
   }
 });
 
-// Get feedback auth ID
-app.get('/api/feedback-auth/:clientId/:serverId', async (req, res) => {
-  try {
-    const { clientId, serverId } = req.params;
-    const feedbackAuthId = await getFeedbackAuthId({
-      clientAgentId: BigInt(clientId),
-      serverAgentId: BigInt(serverId)
-    });
-    
-    res.json({ feedbackAuthId });
-  } catch (error: any) {
-    console.error('[WebClient] Error getting feedback auth ID:', error?.message || error);
-    res.status(500).json({ error: error?.message || 'Internal server error' });
-  }
-});
 
-// Accept feedback via delegation
-app.post('/api/feedback/accept', async (req, res) => {
+
+// Accept feedback via delegation (GET)
+app.get('/api/feedback/accept', async (req, res) => {
   try {
-    const { clientAgentId, agentServerId } = req.body;
-    
-    if (!clientAgentId || !agentServerId) {
-      return res.status(400).json({ error: 'clientAgentId and agentServerId are required' });
+    const agentName = String(req.query.agentName || '').trim();
+    if (!agentName) {
+      return res.status(400).json({ error: 'agentName is required' });
     }
-    
-    const userOpHash = await acceptFeedbackWithDelegation({
-      agentClientId: BigInt(clientAgentId),
-      agentServerId: BigInt(agentServerId)
+
+    const clientPrivateKey = (process.env.CLIENT_PRIVATE_KEY || '').trim() as `0x${string}`;
+    if (!clientPrivateKey || !clientPrivateKey.startsWith('0x')) {
+      throw new Error('CLIENT_PRIVATE_KEY not set or invalid. Please set a 0x-prefixed 32-byte hex in .env');
+    }
+    const clientAccount = privateKeyToAccount(clientPrivateKey);
+
+    console.info("*************** clientAccount", clientAccount); 
+    console.info("*************** agentName", agentName);
+    const result = await acceptFeedbackWithDelegation({
+      clientAccount,
+      agentName
     });
     
-    res.json({ userOpHash });
+    res.json({ result });
   } catch (error: any) {
     console.error('[WebClient] Error accepting feedback:', error?.message || error);
     res.status(500).json({ error: error?.message || 'Internal server error' });
