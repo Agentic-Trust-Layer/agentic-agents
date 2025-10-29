@@ -1,0 +1,28 @@
+{
+  "name": "movie-agent-cloudflare",
+  "version": "0.0.2",
+  "description": "Movie Agent deployed on Cloudflare Pages",
+  "type": "module",
+  "main": "_worker.js",
+  "scripts": {
+    "build": "echo 'Build completed'",
+    "deploy": "wrangler pages deploy",
+    "dev": "wrangler pages dev",
+    "start": "wrangler pages dev"
+  },
+  "dependencies": {
+    "@a2a-js/sdk": "^0.2.4",
+    "@metamask/delegation-toolkit": "0.11.0",
+    "openai": "^4.56.0",
+    "permissionless": "0.2.42",
+    "uuid": "^11.0.3",
+    "viem": "2.31.4",
+    "ethers": "^6.0.0"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

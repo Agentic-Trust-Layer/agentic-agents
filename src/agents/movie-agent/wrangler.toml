@@ -1,0 +1,20 @@
+name = "movie-agent"
+compatibility_date = "2024-01-15"
+compatibility_flags = ["nodejs_compat"]
+
+[env.production]
+name = "movie-agent"
+
+[[env.production.routes]]
+pattern = "movieagent.orgtrust.eth/*"
+zone_name = "orgtrust.eth"
+
+[build]
+command = "npm run build"
+cwd = "."
+
+[functions]
+directory = "functions"
+
+[[functions]]
+pattern = "movieagent.orgtrust.eth/*"
