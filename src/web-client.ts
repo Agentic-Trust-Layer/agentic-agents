@@ -329,7 +329,7 @@ app.get('/api/feedback-auth', async (req, res) => {
 // Test movie agent connection
 app.get('/api/movie-agent/status', async (req, res) => {
   try {
-    const movieAgentUrl = process.env.MOVIE_AGENT_URL || 'http://localhost:41241';
+    const movieAgentUrl = process.env.MOVIE_AGENT_URL || 'https://30391b39.movie-agent.pages.dev';
     const response = await fetch(`${movieAgentUrl}/.well-known/agent-card.json`);
     
     if (response.ok) {
@@ -351,7 +351,7 @@ app.get('/api/movie-agent/status', async (req, res) => {
     res.json({ 
       status: 'disconnected', 
       error: error?.message || 'Connection failed',
-      url: process.env.MOVIE_AGENT_URL || 'http://localhost:41241'
+      url: process.env.MOVIE_AGENT_URL || 'https://30391b39.movie-agent.pages.dev'
     });
   }
 });
@@ -359,7 +359,7 @@ app.get('/api/movie-agent/status', async (req, res) => {
 // AP2: proxy to request a quote from movie-agent (server agent)
 app.post('/api/ap2/quote', async (req, res) => {
   try {
-    const agentBase = process.env.MOVIE_AGENT_URL || 'http://localhost:41241';
+    const agentBase = process.env.MOVIE_AGENT_URL || 'https://30391b39.movie-agent.pages.dev';
     const response = await fetch(`${agentBase}/ap2/quote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -376,7 +376,7 @@ app.post('/api/ap2/quote', async (req, res) => {
 app.post('/api/ap2/invoke', async (req, res) => {
   try {
     const payload: AgentCallEnvelope = req.body as any;
-    const agentBase = process.env.MOVIE_AGENT_URL || 'http://localhost:41241';
+    const agentBase = process.env.MOVIE_AGENT_URL || 'https://30391b39.movie-agent.pages.dev';
     const response = await fetch(`${agentBase}/ap2/invoke`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
