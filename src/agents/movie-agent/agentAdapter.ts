@@ -676,7 +676,7 @@ export async function addFeedback(params: {
         const ratingPctForChain = Math.max(0, Math.min(100, rating * 20));
 
         console.info(" feedbackUri", feedbackUri);
-        
+
         const { txHash } = await rep.giveClientFeedback({
           agentId,
           score: ratingPctForChain,
@@ -916,40 +916,7 @@ export async function requestFeedbackAuth(params: {
 
   console.info("###################### indexLimit", indexLimit);
 
-  /*
-  const eip712 = {
-    domain: {
-      name: 'ERC8004-FeedbackAuth',
-      version: '1',
-      chainId: Number(chainId),
-      verifyingContract: identityReg,
-    },
-    types: {
-      FeedbackAuth: [
-        { name: 'agentId', type: 'uint256' },
-        { name: 'clientAddress', type: 'address' },
-        { name: 'indexLimit', type: 'uint256' },
-        { name: 'expiry', type: 'uint256' },
-        { name: 'chainId', type: 'uint256' },
-        { name: 'identityRegistry', type: 'address' },
-        { name: 'signerAddress', type: 'address' },
-        { name: 'taskRefHash', type: 'bytes32' },
-      ],
-    },
-    message: {
-      agentId: agentId.toString(),
-      clientAddress: params.clientAddress,
-      indexLimit: indexLimit.toString(),
-      expiry: expiry.toString(),
-      chainId: chainId.toString(),
-      identityRegistry: identityReg,
-      signerAddress: sp.sessionAA as `0x${string}`,
-      taskRefHash: params.taskRef ? (ethers.keccak256(ethers.toUtf8Bytes(params.taskRef)) as `0x${string}`) : ('0x' + '00'.repeat(32)) as `0x${string}`,
-    },
-  };
-  */
 
-  // Reuse the same signature format as signFeedbackAuth
 
   const identityReg = await rep.getIdentityRegistry();
   const feedbackAuth = await rep.signFeedbackAuth({

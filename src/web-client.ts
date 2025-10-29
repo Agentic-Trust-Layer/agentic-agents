@@ -11,6 +11,7 @@ import { createPublicClient, http } from 'viem';
 import { reputationRegistryAbi } from "./lib/abi/reputationRegistry.js";
 import { initIdentityClient, getIdentityClient, initReputationClient, getReputationClient } from './agents/movie-agent/clientProvider.js';
 import IpfsService from './services/ipfs.js';
+import type { PaymentQuote, PaymentIntent, AgentCallEnvelope, PaymentReceipt } from './shared/ap2.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -352,6 +353,39 @@ app.get('/api/movie-agent/status', async (req, res) => {
       error: error?.message || 'Connection failed',
       url: process.env.MOVIE_AGENT_URL || 'http://localhost:41241'
     });
+  }
+});
+
+// AP2: proxy to request a quote from movie-agent (server agent)
+app.post('/api/ap2/quote', async (req, res) => {
+  try {
+    const agentBase = process.env.MOVIE_AGENT_URL || 'http://localhost:41241';
+    const response = await fetch(`${agentBase}/ap2/quote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ capability: req.body?.capability || 'summarize:v1' }),
+    } as any);
+    const data = await response.json();
+    res.json(data);
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || 'quote failed' });
+  }
+});
+
+// AP2: proxy to invoke with a signed intent
+app.post('/api/ap2/invoke', async (req, res) => {
+  try {
+    const payload: AgentCallEnvelope = req.body as any;
+    const agentBase = process.env.MOVIE_AGENT_URL || 'http://localhost:41241';
+    const response = await fetch(`${agentBase}/ap2/invoke`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    } as any);
+    const data = await response.json();
+    res.json(data);
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || 'invoke failed' });
   }
 });
 

@@ -6,6 +6,9 @@ import path from "path";
 import { fileURLToPath } from "url";
 import OpenAI from "openai";
 import cors from "cors";
+import { randomUUID, createHash } from 'crypto';
+import { ethers } from 'ethers';
+import type { PaymentQuote, PaymentIntent, AgentCallEnvelope, PaymentReceipt } from '../../shared/ap2.js';
 
 import {
   AgentCard,
@@ -451,6 +454,84 @@ async function main() {
     } catch (error: any) {
       console.error('[MovieAgent] Error getting feedback auth ID:', error?.message || error);
       res.status(500).json({ error: error?.message || 'Internal server error' });
+    }
+  });
+
+  // AP2: minimal quote endpoint
+  const getServerWallet = () => {
+    const pk = (process.env.MOVIE_AGENT_OPERATOR_KEY || process.env.SERVER_PRIVATE_KEY || '').trim();
+    if (!pk || !pk.startsWith('0x')) throw new Error('SERVER_PRIVATE_KEY not set for AP2 signing');
+    return new ethers.Wallet(pk);
+  };
+
+  expressApp.post('/ap2/quote', async (req: any, res: any) => {
+    try {
+      const { capability = 'summarize:v1' } = req.body || {};
+      const agent = String(process.env.MOVIE_AGENT_ADDRESS || '0x0000000000000000000000000000000000000000');
+      const chainIdHex = (process.env.ERC8004_CHAIN_HEX || '0xaa36a7') as `0x${string}`;
+
+      const quote: PaymentQuote = {
+        quoteId: randomUUID(),
+        agent,
+        capability,
+        unit: 'call',
+        rate: String(process.env.AP2_RATE || '0.001'),
+        token: String(process.env.AP2_TOKEN || 'ETH'),
+        chainId: chainIdHex,
+        expiresAt: Date.now() + 5 * 60 * 1000,
+        termsCid: process.env.AP2_TERMS_CID || undefined,
+      };
+      const wallet = getServerWallet();
+      const msg = JSON.stringify(quote);
+      const sig = await wallet.signMessage(ethers.getBytes(ethers.hashMessage(msg)));
+      quote.agentSig = sig;
+      res.json(quote);
+    } catch (e: any) {
+      res.status(400).json({ error: e?.message || 'Failed to produce quote' });
+    }
+  });
+
+  // AP2: minimal invoke endpoint
+  expressApp.post('/ap2/invoke', async (req: any, res: any) => {
+    try {
+      const env: AgentCallEnvelope = req.body;
+      if (!env?.payment?.intent) throw new Error('missing payment intent');
+
+      const intent: PaymentIntent = env.payment.intent;
+      const msg = JSON.stringify({
+        quoteId: intent.quoteId,
+        payer: intent.payer,
+        mode: intent.mode,
+        maxSpend: intent.maxSpend,
+        nonce: intent.nonce,
+        deadline: intent.deadline,
+      });
+
+      const recovered = ethers.verifyMessage(ethers.getBytes(ethers.hashMessage(msg)), intent.signature);
+      if (!recovered || recovered.toLowerCase() !== String(intent.payer).toLowerCase()) {
+        throw new Error('invalid intent signature');
+      }
+
+      const meteredUnits = 1;
+      const rate = Number(process.env.AP2_RATE || '0.001');
+      const amount = (meteredUnits * rate).toString();
+      const requestHash = createHash('sha256').update(JSON.stringify(env.payload || {})).digest('hex');
+      const receipt: PaymentReceipt = {
+        requestHash: `0x${requestHash}` as `0x${string}`,
+        meteredUnits,
+        amount,
+        token: String(process.env.AP2_TOKEN || 'ETH'),
+        chainId: (process.env.ERC8004_CHAIN_HEX || '0xaa36a7') as `0x${string}`,
+        settlementRef: undefined,
+        agentSig: '',
+      };
+      const wallet = getServerWallet();
+      const sig = await wallet.signMessage(ethers.getBytes(ethers.hashMessage(JSON.stringify(receipt))));
+      receipt.agentSig = sig;
+
+      res.json({ ok: true, receipt, result: { message: 'capability executed' } });
+    } catch (e: any) {
+      res.status(400).json({ error: e?.message || 'invoke failed' });
     }
   });
 
