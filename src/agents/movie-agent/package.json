@@ -11,13 +11,8 @@
     "start": "wrangler pages dev"
   },
   "dependencies": {
-    "@a2a-js/sdk": "^0.2.4",
-    "@metamask/delegation-toolkit": "0.11.0",
     "openai": "^4.56.0",
-    "permissionless": "0.2.42",
-    "uuid": "^11.0.3",
-    "viem": "2.31.4",
-    "ethers": "^6.0.0"
+    "uuid": "^11.0.3"
   },
   "devDependencies": {
     "wrangler": "^3.0.0"

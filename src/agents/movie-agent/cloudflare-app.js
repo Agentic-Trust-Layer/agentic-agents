@@ -2,19 +2,20 @@ import { v4 as uuidv4 } from 'uuid';
 import { randomUUID, createHash } from 'crypto';
 import { ethers } from 'ethers';
 import OpenAI from "openai";
-import type { PaymentQuote, PaymentIntent, AgentCallEnvelope, PaymentReceipt } from '../../shared/ap2.js';
+// Type definitions for AP2
+const PaymentQuote = {};
+const PaymentIntent = {};
+const AgentCallEnvelope = {};
+const PaymentReceipt = {};
 
 import {
   AgentCard,
   Task,
-  TaskState,
   TaskStatusUpdateEvent,
-  TextPart,
   Message
 } from "@a2a-js/sdk";
 import {
   InMemoryTaskStore,
-  TaskStore,
   A2AExpressApp,
   AgentExecutor,
   RequestContext,
@@ -26,10 +27,10 @@ import { giveFeedbackWithDelegation, getFeedbackAuthId as serverGetFeedbackAuthI
 import { buildDelegationSetup } from './session.js';
 
 // Simple store for contexts (in production, use Cloudflare KV or Durable Objects)
-const contexts: Map<string, Message[]> = new Map();
+const contexts = new Map();
 
 // Load and render system prompt from file
-function renderSystemPrompt(goal?: string): string {
+function renderSystemPrompt(goal) {
   const raw = `You are a helpful movie agent that can answer questions about movies, actors, directors, and other film-related topics using The Movie Database (TMDB) API.
 
 You have access to the following tools:
@@ -70,21 +71,21 @@ Always end your response with one of these states on a new line:
 /**
  * MovieAgentExecutor implements the agent's core logic.
  */
-class MovieAgentExecutor implements AgentExecutor {
-  private cancelledTasks = new Set<string>();
+class MovieAgentExecutor {
+  cancelledTasks = new Set();
 
-  public cancelTask = async (
-        taskId: string,
-        eventBus: ExecutionEventBus,
-    ): Promise<void> => {
+  cancelTask = async (
+        taskId,
+        eventBus,
+    ) => {
         this.cancelledTasks.add(taskId);
         // The execute loop is responsible for publishing the final state
     };
 
   async execute(
-    requestContext: RequestContext,
-    eventBus: ExecutionEventBus
-  ): Promise<void> {
+    requestContext,
+    eventBus
+  ) {
     const userMessage = requestContext.userMessage;
     const existingTask = requestContext.task;
 
@@ -98,7 +99,7 @@ class MovieAgentExecutor implements AgentExecutor {
 
     // 1. Publish initial Task event if it's a new task
     if (!existingTask) {
-      const initialTask: Task = {
+      const initialTask = {
         kind: 'task',
         id: taskId,
         contextId: contextId,
@@ -113,7 +114,7 @@ class MovieAgentExecutor implements AgentExecutor {
     }
 
     // 2. Publish "working" status update
-    const workingStatusUpdate: TaskStatusUpdateEvent = {
+    const workingStatusUpdate = {
       kind: 'status-update',
       taskId: taskId,
       contextId: contextId,
@@ -140,27 +141,21 @@ class MovieAgentExecutor implements AgentExecutor {
     }
     contexts.set(contextId, historyForGenkit)
 
-    type ChatMessage = {
-      role: 'system' | 'user' | 'assistant' | 'tool';
-      content?: string | null;
-      tool_call_id?: string;
-      // @ts-ignore: allow tool_calls when role is assistant
-      tool_calls?: any;
-    };
+    // ChatMessage type definition removed for Cloudflare compatibility
 
     const systemPrompt = renderSystemPrompt(
-      (existingTask?.metadata?.goal as string | undefined) ||
-        (userMessage.metadata?.goal as string | undefined)
+      (existingTask?.metadata?.goal) ||
+        (userMessage.metadata?.goal)
     );
 
-    const oaiMessages: ChatMessage[] = [
+    const oaiMessages = [
       { role: 'system', content: systemPrompt },
       ...historyForGenkit
         .map((m) => ({
-          role: (m.role === 'agent' ? 'assistant' : 'user') as 'user' | 'assistant',
+          role: (m.role === 'agent' ? 'assistant' : 'user'),
           content: m.parts
-            .filter((p): p is TextPart => p.kind === 'text' && !!(p as TextPart).text)
-            .map((p) => (p as TextPart).text)
+            .filter((p) => p.kind === 'text' && !!p.text)
+            .map((p) => p.text)
             .join('\n') || null,
         }))
         .filter((m) => !!m.content),
@@ -171,7 +166,7 @@ class MovieAgentExecutor implements AgentExecutor {
       console.warn(
         `[MovieAgentExecutor] No valid text messages found in history for task ${taskId}.`
       );
-      const failureUpdate: TaskStatusUpdateEvent = {
+      const failureUpdate = {
         kind: 'status-update',
         taskId: taskId,
         contextId: contextId,
@@ -198,13 +193,13 @@ class MovieAgentExecutor implements AgentExecutor {
       const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
       const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
-      let assistantText: string | null = null;
+      let assistantText = null;
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const completion = await client.chat.completions.create({
           model,
-          messages: oaiMessages as any,
-          tools: openAiToolDefinitions as any,
+          messages: oaiMessages,
+          tools: openAiToolDefinitions,
         });
 
         const msg = completion.choices?.[0]?.message;
@@ -218,15 +213,14 @@ class MovieAgentExecutor implements AgentExecutor {
           oaiMessages.push({
             role: 'assistant',
             content: msg.content ?? null,
-            // @ts-ignore
             tool_calls: toolCalls,
           });
 
           for (const call of toolCalls) {
-            const name = call.function?.name as string;
-            const id = call.id as string;
+            const name = call.function?.name;
+            const id = call.id;
             const argsJson = call.function?.arguments || '{}';
-            let args: any = {};
+            let args = {};
             try { args = JSON.parse(argsJson); } catch {}
             const handler = openAiToolHandlers[name];
             if (!handler) {
@@ -248,7 +242,7 @@ class MovieAgentExecutor implements AgentExecutor {
       if (this.cancelledTasks.has(taskId)) {
         console.log(`[MovieAgentExecutor] Request cancelled for task: ${taskId}`);
 
-        const cancelledUpdate: TaskStatusUpdateEvent = {
+        const cancelledUpdate = {
           kind: 'status-update',
           taskId: taskId,
           contextId: contextId,
@@ -267,7 +261,7 @@ class MovieAgentExecutor implements AgentExecutor {
       const finalStateLine = lines.at(-1)?.trim().toUpperCase();
       const agentReplyText = lines.slice(0, lines.length - 1).join('\n').trim();
 
-      let finalA2AState: TaskState = "unknown";
+      let finalA2AState = "unknown";
 
       if (finalStateLine === 'COMPLETED') {
         finalA2AState = "completed";
@@ -281,7 +275,7 @@ class MovieAgentExecutor implements AgentExecutor {
       }
 
       // 5. Publish final task status update
-      const agentMessage: Message = {
+      const agentMessage = {
         kind: 'message',
         role: 'agent',
         messageId: uuidv4(),
@@ -292,7 +286,7 @@ class MovieAgentExecutor implements AgentExecutor {
       historyForGenkit.push(agentMessage);
       contexts.set(contextId, historyForGenkit)
 
-      const finalUpdate: TaskStatusUpdateEvent = {
+      const finalUpdate = {
         kind: 'status-update',
         taskId: taskId,
         contextId: contextId,
@@ -309,12 +303,12 @@ class MovieAgentExecutor implements AgentExecutor {
         `[MovieAgentExecutor] Task ${taskId} finished with state: ${finalA2AState}`
       );
 
-    } catch (error: any) {
+    } catch (error) {
       console.error(
         `[MovieAgentExecutor] Error processing task ${taskId}:`,
         error
       );
-      const errorUpdate: TaskStatusUpdateEvent = {
+      const errorUpdate = {
         kind: 'status-update',
         taskId: taskId,
         contextId: contextId,
@@ -338,7 +332,7 @@ class MovieAgentExecutor implements AgentExecutor {
 }
 
 // Agent Card definition
-const movieAgentCard: AgentCard = {
+const movieAgentCard = {
   name: 'Movie Agent',
   description: 'An agent that can answer questions about movies and actors using TMDB.',
   url: 'https://movieagent.orgtrust.eth',
@@ -388,12 +382,12 @@ const movieAgentCard: AgentCard = {
   supportsAuthenticatedExtendedCard: false,
 };
 
-export async function createMovieAgentApp(env: any) {
+export async function createMovieAgentApp(env) {
   // Create TaskStore
-  const taskStore: TaskStore = new InMemoryTaskStore();
+  const taskStore = new InMemoryTaskStore();
 
   // Create AgentExecutor
-  const agentExecutor: AgentExecutor = new MovieAgentExecutor();
+  const agentExecutor = new MovieAgentExecutor();
 
   // Create DefaultRequestHandler
   const requestHandler = new DefaultRequestHandler(
@@ -407,7 +401,7 @@ export async function createMovieAgentApp(env: any) {
   
   // Create a simple request handler for Cloudflare Pages Functions
   return {
-    async fetch(request: Request, env: any, ctx: any) {
+    async fetch(request, env, ctx) {
       const url = new URL(request.url);
       
       // Handle CORS preflight
@@ -507,7 +501,7 @@ export async function createMovieAgentApp(env: any) {
               'Access-Control-Allow-Origin': '*',
             },
           });
-        } catch (error: any) {
+        } catch (error) {
           console.error('[MovieAgent] Error getting feedback auth ID:', error?.message || error);
           return new Response(JSON.stringify({ error: error?.message || 'Internal server error' }), {
             status: 500,
@@ -525,9 +519,9 @@ export async function createMovieAgentApp(env: any) {
           const body = await request.json();
           const { capability = 'summarize:v1' } = body || {};
           const agent = String(env.MOVIE_AGENT_ADDRESS || '0x0000000000000000000000000000000000000000');
-          const chainIdHex = (env.ERC8004_CHAIN_HEX || '0xaa36a7') as `0x${string}`;
+          const chainIdHex = (env.ERC8004_CHAIN_HEX || '0xaa36a7');
 
-          const quote: PaymentQuote = {
+          const quote = {
             quoteId: randomUUID(),
             agent,
             capability,
@@ -554,7 +548,7 @@ export async function createMovieAgentApp(env: any) {
               'Access-Control-Allow-Origin': '*',
             },
           });
-        } catch (e: any) {
+        } catch (e) {
           return new Response(JSON.stringify({ error: e?.message || 'Failed to produce quote' }), {
             status: 400,
             headers: {
@@ -568,12 +562,12 @@ export async function createMovieAgentApp(env: any) {
       // Handle AP2 invoke endpoint
       if (url.pathname === '/ap2/invoke' && request.method === 'POST') {
         try {
-          const env_data: AgentCallEnvelope = await request.json();
+          const env_data = await request.json();
           if (!env_data?.payment?.intent) {
             throw new Error('missing payment intent');
           }
 
-          const intent: PaymentIntent = env_data.payment.intent;
+          const intent = env_data.payment.intent;
           const msg = JSON.stringify({
             quoteId: intent.quoteId,
             payer: intent.payer,
@@ -592,12 +586,12 @@ export async function createMovieAgentApp(env: any) {
           const rate = Number(env.AP2_RATE || '0.001');
           const amount = (meteredUnits * rate).toString();
           const requestHash = createHash('sha256').update(JSON.stringify(env_data.payload || {})).digest('hex');
-          const receipt: PaymentReceipt = {
-            requestHash: `0x${requestHash}` as `0x${string}`,
+          const receipt = {
+            requestHash: `0x${requestHash}`,
             meteredUnits,
             amount,
             token: String(env.AP2_TOKEN || 'ETH'),
-            chainId: (env.ERC8004_CHAIN_HEX || '0xaa36a7') as `0x${string}`,
+            chainId: (env.ERC8004_CHAIN_HEX || '0xaa36a7'),
             settlementRef: undefined,
             agentSig: '',
           };
@@ -616,7 +610,7 @@ export async function createMovieAgentApp(env: any) {
               'Access-Control-Allow-Origin': '*',
             },
           });
-        } catch (e: any) {
+        } catch (e) {
           return new Response(JSON.stringify({ error: e?.message || 'invoke failed' }), {
             status: 400,
             headers: {
@@ -657,7 +651,7 @@ export async function createMovieAgentApp(env: any) {
               'Access-Control-Allow-Origin': '*',
             },
           });
-        } catch (error: any) {
+        } catch (error) {
           console.error('[MovieAgent] requestAuth error:', error?.message || error);
           return new Response(JSON.stringify({ error: error?.message || 'Internal server error' }), {
             status: 500,

@@ -1,5 +1,24 @@
 # Movie Agent Cloudflare Pages Deployment Guide
 
+## ✅ Deployment Successful!
+
+Your movie-agent has been successfully deployed to Cloudflare Pages!
+
+**Deployment URL:** https://08de0059.movie-agent.pages.dev
+
+### Test Your Deployment
+
+1. **Agent Card:** https://08de0059.movie-agent.pages.dev/.well-known/agent-card.json
+2. **Chat Endpoint:** POST to https://08de0059.movie-agent.pages.dev/chat
+
+### Example Chat Request
+
+```bash
+curl -X POST https://08de0059.movie-agent.pages.dev/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Tell me about the movie Inception"}'
+```
+
 ## Overview
 
 This guide will help you deploy the movie-agent to Cloudflare Pages. The movie-agent is an AI-powered agent that can answer questions about movies, actors, and directors using The Movie Database (TMDB) API.
@@ -127,11 +146,27 @@ directory = "functions"
 Once deployed, your movie-agent will be available at these endpoints:
 
 - `/.well-known/agent-card.json` - Agent card metadata
-- `/api/feedback-auth/:clientAddress` - Feedback authentication
-- `/ap2/quote` - AP2 payment quotes
-- `/ap2/invoke` - AP2 payment execution
-- `/a2a/skills/agent.feedback.requestAuth` - A2A feedback auth
-- `/a2a/*` - A2A protocol endpoints
+- `/chat` - Chat endpoint for movie queries (POST)
+
+### Chat Endpoint Usage
+
+**POST** `/chat`
+
+Request body:
+```json
+{
+  "message": "Tell me about the movie Inception",
+  "contextId": "optional-context-id"
+}
+```
+
+Response:
+```json
+{
+  "response": "Inception is a 2010 science fiction action film...",
+  "contextId": "generated-or-provided-context-id"
+}
+```
 
 ## Custom Domain Setup
 
