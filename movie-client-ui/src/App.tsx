@@ -96,6 +96,7 @@ function App() {
         })
 
         let workingMessageId: string | null = null
+        let messageProcessed = false // Track if we've already processed the final message content
 
         for await (const event of stream) {
           try {
@@ -122,16 +123,57 @@ function App() {
                   ))
                 }
               } else if (state === 'completed') {
-                let textContent = ''
-                if (statusEvent.status.message) {
+                // Only process message content if we haven't already processed it
+                if (!messageProcessed && statusEvent.status.message) {
                   const agentMessage = statusEvent.status.message
-                  textContent = agentMessage.parts
+                  const textContent = agentMessage.parts
                     .filter((p: any) => p.kind === 'text')
                     .map((p: any) => p.text)
                     .join('\n')
+
+                  if (textContent) {
+                    if (workingMessageId) {
+                      setMessages(prev => prev.map(msg =>
+                        msg.id === workingMessageId
+                          ? { ...msg, content: textContent, status: 'completed' }
+                          : msg
+                      ))
+                    } else {
+                      setMessages(prev => [...prev, {
+                        id: uuidv4(),
+                        role: 'agent',
+                        content: textContent,
+                        timestamp: new Date(),
+                        status: 'completed'
+                      }])
+                    }
+                    messageProcessed = true
+                  }
                 }
 
+                if (statusEvent.taskId) setCurrentTaskId(statusEvent.taskId)
+                if (statusEvent.contextId) setCurrentContextId(statusEvent.contextId)
+              } else if (state === 'failed') {
+                setMessages(prev => prev.map(msg =>
+                  msg.id === workingMessageId
+                    ? { ...msg, content: statusEvent.status.message?.parts?.[0]?.text || 'Error processing request', status: 'failed' }
+                    : msg
+                ))
+                messageProcessed = true
+              }
+            } else if (event.kind === 'message') {
+              // Only process message events if we haven't already processed the content
+              if (!messageProcessed) {
+                const messageEvent = event as Message
+                const textContent = messageEvent.parts
+                  .filter((p: any) => p.kind === 'text')
+                  .map((p: any) => p.text)
+                  .join('\n')
+
                 if (textContent) {
+                  if (messageEvent.taskId) setCurrentTaskId(messageEvent.taskId)
+                  if (messageEvent.contextId) setCurrentContextId(messageEvent.contextId)
+
                   if (workingMessageId) {
                     setMessages(prev => prev.map(msg =>
                       msg.id === workingMessageId
@@ -147,43 +189,7 @@ function App() {
                       status: 'completed'
                     }])
                   }
-                }
-
-                if (statusEvent.taskId) setCurrentTaskId(statusEvent.taskId)
-                if (statusEvent.contextId) setCurrentContextId(statusEvent.contextId)
-              } else if (state === 'failed') {
-                setMessages(prev => prev.map(msg =>
-                  msg.id === workingMessageId
-                    ? { ...msg, content: statusEvent.status.message?.parts?.[0]?.text || 'Error processing request', status: 'failed' }
-                    : msg
-                ))
-              }
-            } else if (event.kind === 'message') {
-              const messageEvent = event as Message
-              const textContent = messageEvent.parts
-                .filter((p: any) => p.kind === 'text')
-                .map((p: any) => p.text)
-                .join('\n')
-
-              if (textContent) {
-                if (messageEvent.taskId) setCurrentTaskId(messageEvent.taskId)
-                if (messageEvent.contextId) setCurrentContextId(messageEvent.contextId)
-
-                if (workingMessageId) {
-                  setMessages(prev => prev.map(msg =>
-                    msg.id === workingMessageId
-                      ? { ...msg, content: textContent, status: 'completed' }
-                      : msg
-                  ))
-                  workingMessageId = null
-                } else {
-                  setMessages(prev => [...prev, {
-                    id: uuidv4(),
-                    role: 'agent',
-                    content: textContent,
-                    timestamp: new Date(),
-                    status: 'completed'
-                  }])
+                  messageProcessed = true
                 }
               }
             }
@@ -371,26 +377,28 @@ function App() {
 
       {/* Input */}
       <div className="bg-gray-800 border-t border-gray-700 px-6 py-4">
-        <div className="flex items-end space-x-4 max-w-4xl mx-auto">
-          <div className="flex-1">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="Ask about movies, actors, directors..."
-              className="w-full bg-gray-700 text-white rounded-lg px-4 py-3 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 border border-gray-600"
-              rows={1}
-              disabled={isLoading}
-            />
-            <p className="text-xs text-gray-500 mt-1">Press Enter to send, Shift+Enter for new line</p>
+        <div className="max-w-4xl mx-auto">
+          <div className="flex items-center space-x-4">
+            <div className="flex-1">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder="Ask about movies, actors, directors..."
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-3 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 border border-gray-600"
+                rows={1}
+                disabled={isLoading}
+              />
+            </div>
+            <button
+              onClick={sendMessage}
+              disabled={!input.trim() || isLoading}
+              className="px-6 h-[42px] bg-primary-500 hover:bg-primary-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
+            >
+              Send
+            </button>
           </div>
-          <button
-            onClick={sendMessage}
-            disabled={!input.trim() || isLoading}
-            className="px-6 py-3 bg-primary-500 hover:bg-primary-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
-          >
-            Send
-          </button>
+          <p className="text-xs text-gray-500 mt-1 ml-0">Press Enter to send, Shift+Enter for new line</p>
         </div>
       </div>
     </div>
