@@ -4,15 +4,9 @@ This directory contains the movie-agent packaged for deployment on Cloudflare Pa
 
 ## Files Overview
 
-- `_worker.js` - Main entry point for Cloudflare Pages Functions
-- `cloudflare-app.js` - Cloudflare-compatible app implementation
+- `_worker.js` - Main entry point and implementation for Cloudflare Pages Functions (self-contained)
 - `wrangler.toml` - Cloudflare Pages configuration
 - `package.json` - Dependencies and scripts for deployment
-- `tools.js` - Movie search tools (copied from original)
-- `tmdb.js` - TMDB API integration (copied from original)
-- `agentAdapter.js` - Agent adapter utilities (copied from original)
-- `session.js` - Session management (copied from original)
-- `agent-card.json` - Agent card configuration
 
 ## Environment Variables Required
 
