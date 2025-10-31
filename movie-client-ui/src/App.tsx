@@ -3,7 +3,7 @@ import { A2AClient } from '@a2a-js/sdk/client'
 import type { Message, TaskStatusUpdateEvent, TaskArtifactUpdateEvent, AgentCard } from '@a2a-js/sdk'
 import { v4 as uuidv4 } from 'uuid'
 
-const MOVIE_AGENT_URL = 'https://b3b17ea0.movie-agent.pages.dev'
+const MOVIE_AGENT_URL = 'https://b07629d5.movie-agent.pages.dev'
 
 interface ChatMessage {
   id: string
@@ -28,12 +28,13 @@ function App() {
     const init = async () => {
       try {
         // Create A2A client
+        console.log('get agent card from MOVIE_AGENT_URL', MOVIE_AGENT_URL)
         const client = new A2AClient(MOVIE_AGENT_URL, '.well-known/agent-card.json')
         clientRef.current = client
         
         // Fetch agent card
         const card = await client.getAgentCard()
-        
+        console.log('get agent card', card)
 
         
         setAgentCard(card)

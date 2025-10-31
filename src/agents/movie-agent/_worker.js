@@ -192,12 +192,12 @@ export default {
       try {
         const baseUrl = `${url.protocol}//${url.host}/`;
         const agentCard = {
-          name: "movieagent.orgtrust.eth",
+          name: "movieagent.8004-agent.eth",
           description: "movie agent description ....",
           url: baseUrl,
           provider: {
-            organization: "A2A Samples",
-            url: "https://example.com/a2a-samples"
+            organization: "8004-agent.eth",
+            url: "https://www.richcanvas3.com"
           },
           version: "0.0.2",
           capabilities: {
@@ -238,7 +238,7 @@ export default {
           ],
           registrations: [
             {
-              agentId: 11,
+              agentId: 724,
               agentAddress: "eip155:11155111:0x80fAA3740fDb03D7536C7fEef94f6F34Ea932bd3",
               signature: "0x4d6ff18c69d1306363b4728dfecbf6f71c552936c8cb3c5b47d255f0f20719f042e25d6b70258856a91c1c9c07ab7cb5ee5402fe0c6ff39109f2b63329993afe1b"
             }

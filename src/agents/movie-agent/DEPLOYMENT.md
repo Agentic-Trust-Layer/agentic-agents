@@ -101,8 +101,8 @@ compatibility_flags = ["nodejs_compat"]
 name = "movie-agent"
 
 [[env.production.routes]]
-pattern = "movieagent.orgtrust.eth/*"
-zone_name = "orgtrust.eth"
+pattern = "mmovieagent.8004-agent.eth/*"
+zone_name = "8004-agent.eth"
 
 [build]
 command = "npm run build"
@@ -170,7 +170,7 @@ Response:
 
 ## Custom Domain Setup
 
-To set up a custom domain (e.g., `movieagent.orgtrust.eth`):
+To set up a custom domain (e.g., `movieagent.8004-agent.eth`):
 
 1. Go to Cloudflare Pages dashboard
 2. Select your `movie-agent` project

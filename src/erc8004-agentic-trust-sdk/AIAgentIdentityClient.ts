@@ -705,7 +705,7 @@ export class AIAgentIdentityClient extends BaseIdentityClient {
           outputs: [{ name: "node", type: "bytes32" }],
         }],
         functionName: "setName",
-        args: [ensFullName], // e.g. "finder-airbnb-com.orgtrust.eth"
+        args: [ensFullName], // e.g. "movieagent.8004-agent.eth"
       });
 
       const call = {

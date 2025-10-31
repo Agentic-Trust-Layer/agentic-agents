@@ -341,10 +341,10 @@ const movieAgentCard: AgentCard = {
   // Adjust the base URL and port as needed. /a2a is the default base in A2AExpressApp
   url: 'http://localhost:41241/', // Example: if baseUrl in A2AExpressApp 
   provider: {
-    organization: 'A2A Samples',
-    url: 'https://example.com/a2a-samples' // Added provider URL
+    organization: 'OrgTrust.eth',
+    url: 'https://www.richcanvas3.com' // Added provider URL
   },
-  version: '0.0.2', // Incremented version
+  version: '0.0.4', // Incremented version
   capabilities: {
     streaming: true, // The new framework supports streaming
     pushNotifications: false, // Assuming not implemented for this agent yet
