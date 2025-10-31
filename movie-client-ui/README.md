@@ -40,10 +40,68 @@ npm run build
 npm run preview
 ```
 
+## Deployment to Cloudflare Pages
+
+### Prerequisites
+
+1. Install Wrangler CLI (if not already installed):
+   ```bash
+   npm install -g wrangler
+   ```
+
+2. Authenticate with Cloudflare:
+   ```bash
+   wrangler login
+   ```
+
+### Deploy
+
+#### Option 1: Using npm script
+
+```bash
+npm run deploy
+```
+
+#### Option 2: Using deployment script
+
+```bash
+chmod +x deploy.sh
+./deploy.sh
+```
+
+#### Option 3: Manual deployment
+
+```bash
+# Build the project
+npm run build
+
+# Deploy to Cloudflare Pages
+wrangler pages deploy dist --project-name movie-client-ui
+```
+
+### First-Time Setup
+
+If this is your first deployment, create the Pages project:
+
+```bash
+wrangler pages project create movie-client-ui
+```
+
+Then deploy as shown above.
+
+### Deployment Configuration
+
+- **Build Output Directory**: `dist` (configured in `wrangler.toml`)
+- **Project Name**: `movie-client-ui`
+- **SPA Routing**: Handled via `public/_redirects` file
+
+The deployed app will be available at a URL like:
+`https://[hash].movie-client-ui.pages.dev`
+
 ## Configuration
 
 The app is configured to use the deployed movie agent at:
-`https://30391b39.movie-agent.pages.dev`
+`https://b07629d5.movie-agent.pages.dev`
 
 To change this, edit the `MOVIE_AGENT_URL` constant in `src/App.tsx`.
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { A2AClient } from '@a2a-js/sdk/client'
-import type { Message, TaskStatusUpdateEvent, TaskArtifactUpdateEvent, AgentCard } from '@a2a-js/sdk'
+import type { Message, TaskStatusUpdateEvent, AgentCard } from '@a2a-js/sdk'
 import { v4 as uuidv4 } from 'uuid'
 
 const MOVIE_AGENT_URL = 'https://b07629d5.movie-agent.pages.dev'
@@ -157,7 +157,7 @@ function App() {
               } else if (state === 'failed') {
                 setMessages(prev => prev.map(msg =>
                   msg.id === workingMessageId
-                    ? { ...msg, content: statusEvent.status.message?.parts?.[0]?.text || 'Error processing request', status: 'failed' }
+                    ? { ...msg, content: (statusEvent.status.message?.parts?.[0] && statusEvent.status.message.parts[0].kind === 'text' ? statusEvent.status.message.parts[0].text : 'Error processing request') || 'Error processing request', status: 'failed' }
                     : msg
                 ))
                 messageProcessed = true
@@ -232,7 +232,8 @@ function App() {
               .join('\n')
           } else if (statusEvent.status.state === 'failed') {
             responseStatus = 'failed'
-            textContent = statusEvent.status.message?.parts?.[0]?.text || 'Error processing request'
+            const firstPart = statusEvent.status.message?.parts?.[0]
+            textContent = (firstPart && firstPart.kind === 'text' ? firstPart.text : 'Error processing request') || 'Error processing request'
           }
         } else if (response.kind === 'message') {
           const messageEvent = response as Message
