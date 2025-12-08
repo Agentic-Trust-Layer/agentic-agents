@@ -11,9 +11,9 @@
     "deploy": "npm run build && wrangler pages deploy dist --project-name movie-client-ui"
   },
   "dependencies": {
-    "@agentic-trust/core": "^1.0.15",
-    "@agentic-trust/8004-sdk": "^1.0.15",
-    "@agentic-trust/8004-ext-sdk": "^1.0.15",
+    "@agentic-trust/core": "^1.0.34",
+    "@agentic-trust/8004-sdk": "^1.0.34",
+    "@agentic-trust/8004-ext-sdk": "^1.0.34",
     "@a2a-js/sdk": "^0.2.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
