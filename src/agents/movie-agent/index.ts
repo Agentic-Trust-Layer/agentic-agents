@@ -21,15 +21,15 @@ import {
 import {
   InMemoryTaskStore,
   TaskStore,
-  A2AExpressApp,
   AgentExecutor,
   RequestContext,
   ExecutionEventBus,
   DefaultRequestHandler,
 } from "@a2a-js/sdk/server";
+import { A2AExpressApp } from "@a2a-js/sdk/server/express";
 import { openAiToolDefinitions, openAiToolHandlers } from "./tools.js";
 import { giveFeedbackWithDelegation, getFeedbackAuthId as serverGetFeedbackAuthId, requestFeedbackAuth } from './agentAdapter.js';
-import { buildDelegationSetup } from './session.js';
+//import { buildDelegationSetup } from './session.js';
 
 if (!process.env.OPENAI_API_KEY || !process.env.TMDB_API_KEY) {
   console.error("OPENAI_API_KEY and TMDB_API_KEY environment variables are required")
@@ -335,16 +335,21 @@ class MovieAgentExecutor implements AgentExecutor {
 
 // --- Server Setup ---
 
+// Get agent name from environment variables
+const agentName = process.env.AGENT_NAME || process.env.MOVIE_AGENT_NAME || 'Movie Agent';
+const agentUrl = process.env.AGENT_URL || `http://${process.env.HOST || 'movieagent.localhost'}:${process.env.PORT || 41241}/`;
+
 const movieAgentCard: AgentCard = {
-  name: 'Movie Agent',
+  name: agentName,
   description: 'An agent that can answer questions about movies and actors using TMDB.',
   // Adjust the base URL and port as needed. /a2a is the default base in A2AExpressApp
-  url: 'http://localhost:41241/', // Example: if baseUrl in A2AExpressApp 
+  url: agentUrl, 
   provider: {
     organization: 'OrgTrust.eth',
     url: 'https://www.richcanvas3.com' // Added provider URL
   },
   version: '0.0.4', // Incremented version
+  protocolVersion: '0.3.0',
   capabilities: {
     streaming: true, // The new framework supports streaming
     pushNotifications: false, // Assuming not implemented for this agent yet
@@ -420,7 +425,7 @@ async function main() {
   // 4. Create and setup A2AExpressApp
   console.info("*************** create A2AExpressApp");
   const appBuilder = new A2AExpressApp(requestHandler);
-  const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://movieclient.localhost:3000')
+  const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:4002,http://movieclient.localhost:3000')
     .split(',')
     .map(o => o.trim())
     .filter(o => o.length > 0);
@@ -431,18 +436,8 @@ async function main() {
   console.info("*************** setup routes");
   const expressApp = appBuilder.setupRoutes(app);
 
-  // 4.5. Add static agent card endpoint
-  console.info("*************** add static agent card endpoint");
-  expressApp.get('/.well-known/agent-card.json', (req: any, res: any) => {
-    try {
-      const agentCardPath = path.join(__dirname, 'agent-card.json');
-      const agentCard = JSON.parse(fs.readFileSync(agentCardPath, 'utf8'));
-      res.json(agentCard);
-    } catch (error) {
-      console.error('Error serving agent card:', error);
-      res.status(500).json({ error: 'Failed to load agent card' });
-    }
-  });
+  // 4.5. Agent card endpoint is handled automatically by A2AExpressApp.setupRoutes()
+  // No need for custom endpoint - A2AExpressApp serves it from the requestHandler
 
   // 4.6. Add feedback auth endpoint
   console.info("*************** add feedback auth endpoint");
@@ -539,17 +534,46 @@ async function main() {
   // POST /a2a/skills/agent.feedback.requestAuth
   expressApp.post('/a2a/skills/agent.feedback.requestAuth', async (req: any, res: any) => {
     try {
-      const { agentId, clientAddress, taskRef, chainId, expiry, indexLimit } = req.body || {};
-      if (!clientAddress) return res.status(400).json({ error: 'clientAddress required' });
+      console.info(`************ [MovieAgent] requestAuthabc123qqq: ${JSON.stringify(req.body)}`);
+      // Expected request body parameters (matching agentAdapter.ts function signature):
+      // - clientAddress (required): string - Client's Ethereum address
+      // - chainId (required): number - Chain ID (defaults to 11155111 for Sepolia)
+      // - indexLimit (required): number - Maximum index for feedback auth (will be converted to BigInt)
+      // - expirySeconds (required): number - Expiration time in seconds (defaults to 3600)
+      // - agentId (required): string - Agent ID as string (will be converted to BigInt)
+      // - taskRef (required): string - Task reference identifier
+      const { agentId, clientAddress, taskRef, chainId, expirySeconds, expiry, indexLimit } = req.body || {};
+      
+      // Validate required parameters
+      if (!clientAddress) {
+        return res.status(400).json({ error: 'clientAddress is required' });
+      }
+      if (!agentId) {
+        return res.status(400).json({ error: 'agentId is required' });
+      }
+      if (!taskRef) {
+        return res.status(400).json({ error: 'taskRef is required' });
+      }
+      
+      // Support both 'expiry' and 'expirySeconds' for backward compatibility
+      const expirySec = expirySeconds ?? expiry;
+
+      console.info("........... request feedback auth ........: ", agentId, clientAddress, taskRef, chainId)
       const result = await requestFeedbackAuth({
-        agentId: agentId ? BigInt(agentId) : undefined,
-        clientAddress,
+        agentId: BigInt(agentId),
+        clientAddress: clientAddress as `0x${string}`,
         taskRef,
         chainId,
-        expirySeconds: expiry,
+        expirySeconds: expirySec,
         indexLimit: indexLimit ? BigInt(indexLimit) : undefined,
       });
-      res.json(result);
+      console.info("........... request feedback auth result ........: ", result);
+      // Convert result to JSON-safe format (BigInt values are already strings in the result)
+      res.json({
+        feedbackAuthId: result.signature,
+        signature: result.signature,
+        signerAddress: result.signerAddress
+      });
     } catch (error: any) {
       console.error('[MovieAgent] requestAuth error:', error?.message || error);
       res.status(500).json({ error: error?.message || 'Internal server error' });

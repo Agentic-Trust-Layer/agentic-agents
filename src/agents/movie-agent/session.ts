@@ -86,6 +86,7 @@ function defaultRpcUrlFor(chainId: number): string | null {
   }
 }
 
+/*
 export function buildDelegationSetup(pkg?: SessionPackage): DelegationSetup {
   const session = pkg ?? loadSessionPackage();
   validateSessionPackage(session);
@@ -153,4 +154,4 @@ export async function buildAgentAccountFromSession(): Promise<any> {
   throw new Error(`No compatible smart account builder found in permissionless/accounts. Available exports: ${available.join(', ')}`);
 }
 
-
+*/

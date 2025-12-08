@@ -62,6 +62,9 @@ async function resolveFeedbackAuth(params: { clientAddress: string; agentName: s
   const hasSkill = skills.some((s: any) => s?.id === 'agent.feedback.requestAuth' || s?.name === 'agent.feedback.requestAuth');
   if (!hasSkill) throw new Error('Agent does not advertise agent.feedback.requestAuth');
   const a2aBase = (card?.endpoint && typeof card.endpoint === 'string') ? String(card.endpoint).replace(/\/+$/, '') : `${base}/a2a`;
+  
+  
+  console.info("........... a2aBase ........: ", a2aBase);
   const skillUrl = `${a2aBase}/skills/agent.feedback.requestAuth`;
   const resp = await fetch(skillUrl, {
     method: 'POST',

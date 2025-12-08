@@ -1,26 +1,37 @@
 {
-    "chainId": 11155111,
-    "aa": "0x64DBb2543A43dE1A2004d52071E6b4CD16b67D05",
-    "sessionAA": "0x3988B7e82b1b550251F8B2Bdb2448c396e6fd04A",
-    "reputationRegistry": "0xCA77EDF9aB1532679d4b86517D007F38FBBA8EE6",
-    "selector": "0x8524d988",
-    "sessionKey": {
-      "privateKey": "...",
-      "address": "0xC95Ce9A31D5B617749EDC4FE284B736E302fBEdd",
-      "validAfter": 1757018315,
-      "validUntil": 1757020175
+  "agentId": 1911,
+  "chainId": 11155111,
+  "aa": "0x33f3156728c52fc5148f2d4140f0b7b35df6f592",
+  "sessionAA": "0x514735e5337cFF19Dd03A5082D81D6Ab45Ff8c1F",
+  "selector": "0x8524d988",
+  "sessionKey": {
+    "privateKey": "0x9b2b88b89764cc079d1db823d5e89fadd503dedbbb487e3f8c6ad8a340f29ba1",
+    "address": "0xc5205fA5a53D4baa322c9172A56E2A3B4677AC1d",
+    "validAfter": 1763473555,
+    "validUntil": 1763475415
+  },
+  "entryPoint": "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
+  "bundlerUrl": "https://api.pimlico.io/v2/11155111/rpc?apikey=pim_HmE7RySzpkRBpcekjHfXpT",
+  "signedDelegation": {
+    "message": {
+      "delegate": "0x514735e5337cFF19Dd03A5082D81D6Ab45Ff8c1F",
+      "delegator": "0x33f3156728c52fc5148f2d4140f0b7b35df6f592",
+      "authority": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "caveats": [
+        {
+          "enforcer": "0x7F20f61b1f09b08D970938F6fa563634d65c4EeB",
+          "terms": "0x0000000000000000000000000000000000000000",
+          "args": "0x"
+        },
+        {
+          "enforcer": "0x2c21fD0Cb9DC8445CB3fb0DC5E7Bb0Aca01842B5",
+          "terms": "0x8524d988",
+          "args": "0x"
+        }
+      ],
+      "salt": "0x",
+      "signature": "0x"
     },
-    "entryPoint": "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
-    "bundlerUrl": "https://api.pimlico.io/v2/11155111/rpc?apikey=...",
-    "signedDelegation": {
-      "message": {
-        "delegate": "0x3988B7e82b1b550251F8B2Bdb2448c396e6fd04A",
-        "delegator": "0x64DBb2543A43dE1A2004d52071E6b4CD16b67D05",
-        "authority": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-        "caveats": [],
-        "salt": "0x",
-        "signature": "0x"
-      },
-      "signature": "0x5c53b0392ae8da7c30e9689ee69afed4e6902e9ee37118c22454eeb137f6191c140aef1e8ac207019dbd65c6bbc4362edc941d90f3f69af45572517aa13ce43f1c"
-    }
+    "signature": "0x3089725a716a9254969687caf4502c665e7a4755dacfb93f4e65f25e30ad48af72f9e9e84ad268c090049bd0dbcd6e07a480c33764798eecf0fe188205646df21b"
   }
+}

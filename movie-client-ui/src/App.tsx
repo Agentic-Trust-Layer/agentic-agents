@@ -3,7 +3,10 @@ import { A2AClient } from '@a2a-js/sdk/client'
 import type { Message, TaskStatusUpdateEvent, AgentCard } from '@a2a-js/sdk'
 import { v4 as uuidv4 } from 'uuid'
 
-const MOVIE_AGENT_URL = 'https://b07629d5.movie-agent.pages.dev'
+const MOVIE_AGENT_URL = 'http://movieagent.localhost:5002'
+//const MOVIE_AGENT_URL = 'https://b07629d5.movie-agent.pages.dev'
+// Use local backend server (same port as backend)
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000'
 
 interface ChatMessage {
   id: string
@@ -11,6 +14,129 @@ interface ChatMessage {
   content: string
   timestamp: Date
   status?: 'working' | 'completed' | 'failed'
+}
+
+interface FeedbackDialogProps {
+  isOpen: boolean
+  onClose: () => void
+  onSubmit: (rating: number, comment: string) => Promise<void>
+  agentName?: string
+}
+
+function FeedbackDialog({ isOpen, onClose, onSubmit, agentName }: FeedbackDialogProps) {
+  const [rating, setRating] = useState(5)
+  const [comment, setComment] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState(false)
+
+  if (!isOpen) return null
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!comment.trim()) {
+      setError('Please enter a comment')
+      return
+    }
+    setIsSubmitting(true)
+    setError(null)
+    setSuccess(false)
+    try {
+      await onSubmit(rating, comment)
+      setSuccess(true)
+      setComment('')
+      setRating(5)
+      // Close dialog after a short delay to show success message
+      setTimeout(() => {
+        setSuccess(false)
+        onClose()
+      }, 1500)
+    } catch (err: any) {
+      setError(err.message || 'Failed to submit feedback')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <div 
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div 
+        className="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4 border border-gray-700"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-xl font-bold text-white mb-4">Give Feedback</h2>
+        {agentName && (
+          <p className="text-sm text-gray-400 mb-4">Agent: {agentName}</p>
+        )}
+        <form onSubmit={handleSubmit}>
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Rating
+            </label>
+            <div className="flex space-x-2">
+              {[1, 2, 3, 4, 5].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => setRating(num)}
+                  className={`w-10 h-10 rounded-lg font-medium transition-colors ${
+                    rating === num
+                      ? 'bg-primary-500 text-white'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  {num}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Comment
+            </label>
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Enter your feedback..."
+              className="w-full bg-gray-700 text-white rounded-lg px-4 py-3 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 border border-gray-600"
+              rows={4}
+              disabled={isSubmitting}
+            />
+          </div>
+          {error && (
+            <div className="mb-4 p-3 bg-red-500/20 border border-red-500 rounded-lg">
+              <p className="text-red-300 text-sm whitespace-pre-line">{error}</p>
+            </div>
+          )}
+          {success && (
+            <div className="mb-4 p-3 bg-green-500/20 border border-green-500 rounded-lg">
+              <p className="text-green-300 text-sm">Feedback submitted successfully!</p>
+            </div>
+          )}
+          <div className="flex space-x-3">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSubmitting}
+              className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting || !comment.trim()}
+              className="flex-1 px-4 py-2 bg-primary-500 hover:bg-primary-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
+            >
+              {isSubmitting ? 'Submitting...' : 'Submit'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
 }
 
 function App() {
@@ -21,6 +147,7 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [currentTaskId, setCurrentTaskId] = useState<string | undefined>()
   const [currentContextId, setCurrentContextId] = useState<string | undefined>()
+  const [showFeedbackDialog, setShowFeedbackDialog] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const clientRef = useRef<A2AClient | null>(null)
 
@@ -59,11 +186,20 @@ function App() {
   const sendMessage = async () => {
     if (!input.trim() || isLoading || !clientRef.current) return
 
+    const userInput = input.trim()
+    
+    // Check if user wants to give feedback
+    if (checkForFeedbackIntent(userInput)) {
+      setShowFeedbackDialog(true)
+      setInput('')
+      return
+    }
+
     const userMessageId = uuidv4()
     const userMessage: ChatMessage = {
       id: userMessageId,
       role: 'user',
-      content: input.trim(),
+      content: userInput,
       timestamp: new Date()
     }
 
@@ -306,6 +442,129 @@ function App() {
     }
   }
 
+  // Check if user input indicates they want to give feedback
+  const checkForFeedbackIntent = (text: string): boolean => {
+    const lowerText = text.toLowerCase().trim()
+    const feedbackKeywords = ['give review', 'give feedback', 'leave review', 'leave feedback', 'rate', 'review', 'feedback']
+    return feedbackKeywords.some(keyword => lowerText.includes(keyword))
+  }
+
+  // Helper function to create a timeout signal
+  const createTimeoutSignal = (ms: number): AbortSignal => {
+    const controller = new AbortController()
+    setTimeout(() => controller.abort(), ms)
+    return controller.signal
+  }
+
+  // Handle feedback submission
+  const handleFeedbackSubmit = async (rating: number, comment: string) => {
+    const agentName = agentCard?.name || 'movie-agent'
+    
+    // Check if backend is available
+    let backendAvailable = false
+    try {
+      const testResp = await fetch(`${BACKEND_URL}/api/health`, {
+        method: 'GET',
+        signal: createTimeoutSignal(5000) // 5 second timeout
+      })
+      backendAvailable = testResp.ok || testResp.status === 200
+    } catch (err: any) {
+      // Connection refused or timeout
+      const errorMsg = err.message || err.toString() || ''
+      if (
+        err.name === 'AbortError' || 
+        errorMsg.includes('Failed to fetch') || 
+        errorMsg.includes('ERR_CONNECTION_REFUSED') ||
+        errorMsg.includes('NetworkError') ||
+        errorMsg.includes('network')
+      ) {
+        throw new Error(
+          `Backend server is not available at ${BACKEND_URL}.\n\n` +
+          `To fix this:\n` +
+          `1. Start the backend server: npm run dev:backend\n` +
+          `2. Or run both frontend and backend: npm run dev:all\n` +
+          `3. Ensure it's running on port 3000 (or set VITE_BACKEND_URL environment variable)`
+        )
+      }
+      throw err
+    }
+
+    if (!backendAvailable) {
+      throw new Error(
+        `Backend server is not responding at ${BACKEND_URL}.\n\n` +
+        `Please ensure the backend server is running.`
+      )
+    }
+    
+    // Get client address from backend
+    let clientAddress = ''
+    try {
+      const addrResp = await fetch(`${BACKEND_URL}/api/config/client-address`, {
+        signal: createTimeoutSignal(5000)
+      })
+      if (addrResp.ok) {
+        const addrJson = await addrResp.json()
+        clientAddress = (addrJson.clientAddress || '').trim()
+      }
+    } catch (err: any) {
+      console.warn('Could not get client address from backend:', err)
+      // Continue without client address - backend will try to resolve it
+    }
+
+    // Get feedbackAuth if we have client address and agent name
+    let feedbackAuthId = ''
+    if (clientAddress && agentName) {
+      try {
+        // taskRef is required - use taskId if available, otherwise contextId, otherwise generate one
+        const taskRef = currentTaskId || currentContextId || `task-${Date.now()}`
+        const faResp = await fetch(
+          `${BACKEND_URL}/api/feedback-auth?clientAddress=${encodeURIComponent(clientAddress)}&agentName=${encodeURIComponent(agentName)}&taskRef=${encodeURIComponent(taskRef)}`,
+          { signal: createTimeoutSignal(10000) }
+        )
+        if (faResp.ok) {
+          const fa = await faResp.json()
+          if (fa?.feedbackAuthId) {
+            feedbackAuthId = fa.feedbackAuthId
+          }
+        }
+      } catch (err) {
+        console.warn('Could not get feedbackAuth:', err)
+        // Continue without feedbackAuth - backend will try to resolve it
+      }
+    }
+
+    // Submit feedback
+    const response = await fetch(`${BACKEND_URL}/api/feedback`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        rating,
+        comment,
+        agentName,
+        ...(currentTaskId && { taskId: currentTaskId }),
+        ...(currentContextId && { contextId: currentContextId }),
+        ...(feedbackAuthId && { feedbackAuthId }),
+      }),
+      signal: createTimeoutSignal(30000) // 30 second timeout for submission
+    })
+
+    if (!response.ok) {
+      let errorMessage = 'Failed to submit feedback'
+      try {
+        const result = await response.json()
+        errorMessage = result.error || errorMessage
+      } catch {
+        errorMessage = `HTTP ${response.status}: ${response.statusText}`
+      }
+      throw new Error(errorMessage)
+    }
+
+    const result = await response.json()
+    return result
+  }
+
   return (
     <div className="flex flex-col h-screen">
       {/* Header */}
@@ -403,6 +662,14 @@ function App() {
           <p className="text-xs text-gray-500 mt-1 ml-0">Press Enter to send, Shift+Enter for new line</p>
         </div>
       </div>
+
+      {/* Feedback Dialog */}
+      <FeedbackDialog
+        isOpen={showFeedbackDialog}
+        onClose={() => setShowFeedbackDialog(false)}
+        onSubmit={handleFeedbackSubmit}
+        agentName={agentCard?.name}
+      />
     </div>
   )
 }

@@ -12,8 +12,10 @@
     "a2a:cli": "npx tsx src/cli.ts",
     "web-client": "npx tsx src/web-client.ts",
     "agents:movie-agent": "npx tsx src/agents/movie-agent/index.ts",
+    "agents:movie-agent:express": "npx tsx src/agents/movie-agent/index.ts",
     "agents:coder": "npx tsx src/agents/coder/index.ts",
-    "agents:content-editor": "npx tsx src/agents/content-editor/index.ts"
+    "agents:content-editor": "npx tsx src/agents/content-editor/index.ts",
+    "dev:all": "npx concurrently \"npm run web-client\" \"cd movie-client-ui && npm run dev\" --names \"backend,frontend\" --prefix-colors \"blue,green\""
   },
   "dependencies": {
     "@a2a-js/sdk": "^0.2.4",

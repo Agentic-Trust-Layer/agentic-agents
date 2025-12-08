@@ -1,26 +1,13 @@
 import { createPublicClient, createWalletClient, custom, http, defineChain, encodeFunctionData, encodeAbiParameters, keccak256, isHex, hexToBytes, sliceHex, zeroAddress, toHex, getAddress, type Address, type Chain, type PublicClient, type Account } from "viem";
 import { identityRegistryAbi } from "../../lib/abi/identityRegistry.js";
-import { initReputationClient, getReputationClient, initIdentityClient, getIdentityClient } from './clientProvider.js';
+import { initReputationClient, getReputationClient as getReputationClientLegacy, initIdentityClient, getIdentityClient } from './clientProvider.js';
+// @ts-expect-error - TypeScript module resolution issue, but exports exist at runtime
+import { getReputationClient, buildAgentDetail, getAgenticTrustClient, loadSessionPackage} from '@agentic-trust/core/server';
 import { reputationRegistryAbi } from "../../lib/abi/reputationRegistry.js";
 import { createBundlerClient, createPaymasterClient } from 'viem/account-abstraction';
-import { buildDelegationSetup } from './session.js';
+
 import { privateKeyToAccount } from 'viem/accounts';
-import {
-    Implementation,
-    toMetaMaskSmartAccount,
-    type MetaMaskSmartAccount,
-    type DelegationStruct,
-    type ExecutionStruct,
-    createDelegation,
-    type ToMetaMaskSmartAccountReturnType,
-    DelegationFramework,
-    SINGLE_DEFAULT_MODE,
-    getExplorerTransactionLink,
-    getExplorerAddressLink,
-    createExecution,
-    getDelegationHashOffchain,
-    Delegation
-  } from "@metamask/delegation-toolkit";
+
 import { sepolia } from "viem/chains";
 
 import { ethers } from 'ethers';
@@ -63,7 +50,14 @@ export async function createFeedbackAuth(params: {
     chainIdOverride,
   } = params;
 
-  const rep = getReputationClient();
+  // Use official AgenticTrustClient singleton (initializes from env vars automatically)
+  // Fall back to legacy client if needed
+  let rep;
+  try {
+    rep = await getReputationClient();
+  } catch {
+    rep = getReputationClient();
+  }
   const identityReg = await rep.getIdentityRegistry();
 
   // Ensure IdentityRegistry operator approvals are configured for sessionAA
@@ -435,7 +429,7 @@ export async function giveFeedbackWithDelegation(params: {
   agentAccount?: any; // Smart account configured for the session key
 }): Promise<`0x${string}`> {
 
-  const sp = buildDelegationSetup();
+  const sp = loadSessionPackage();
   const agentId = sp.agentId;
 
 
@@ -472,24 +466,11 @@ export async function giveFeedbackWithDelegation(params: {
     // signer: agent owner/operator derived from session key
     const ownerEOA = privateKeyToAccount(sp.sessionKey.privateKey);
     
-    const signerSmartAccount = await toMetaMaskSmartAccount({
-      client: publicClient,
-      chain: sepolia,
-      implementation: Implementation.Hybrid,
-      address: sp.sessionAA as `0x${string}`,
-      signatory: { account: ownerEOA as any },
-    } as any);
 
 
-    await initReputationClient({
-      publicClient: publicClient as any,
-      walletClient: walletClient as any,
-      agentAccount: (signerSmartAccount) as any,
-      clientAccount: (clientAccount) as any,
-      reputationRegistry: sp.reputationRegistry as `0x${string}`
-    } as any);
 
-    const rep = getReputationClient();
+    // Use official AgenticTrustClient singleton (initializes from env vars automatically)
+    const rep = await getReputationClient();
 
 
 
@@ -566,16 +547,9 @@ export async function giveFeedbackWithDelegation(params: {
   const publicClient = createPublicClient({ chain: sepolia, transport: http(sp.rpcUrl) });
 
 
-  await initReputationClient({
-    publicClient: publicClient as any,
-    walletClient: walletClient as any,
-    agentAccount: (clientAccount) as any,
-    clientAccount: (clientAccount) as any,
-    reputationRegistry: sp.reputationRegistry as `0x${string}`
-  } as any);
-
+  // Use official AgenticTrustClient singleton (initializes from env vars automatically)
   console.info("*************** giveFeedback with delegation yyy 1");
-  const rep = getReputationClient();
+  const rep = await getReputationClient();
   const { txHash } = await rep.giveClientFeedback({
     agentId,
     score,
@@ -662,16 +636,8 @@ export async function addFeedback(params: {
         const publicClient = createPublicClient({ chain: sepolia, transport: http(rpcUrl) });
         const clientAccount = privateKeyToAccount(clientPrivateKey);
 
-        await initReputationClient({
-          publicClient: publicClient as any,
-          walletClient: walletClient as any,
-          agentAccount: (clientAccount) as any,
-          clientAccount: (clientAccount) as any,
-          reputationRegistry: repReg,
-          ensRegistry: (process.env.ENS_REGISTRY || process.env.NEXT_PUBLIC_ENS_REGISTRY || '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e') as any,
-        } as any);
-
-        const rep = getReputationClient();
+        // Use official AgenticTrustClient singleton (initializes from env vars automatically)
+        const rep = await getReputationClient();
         const zeroBytes32 = '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`;
         const ratingPctForChain = Math.max(0, Math.min(100, rating * 20));
 
@@ -750,17 +716,10 @@ export async function acceptFeedbackWithDelegation(params: {
   }
 
 
-  // Initialize identity client to resolve agent info by name
-  const ensRegistry = (process.env.ENS_REGISTRY || process.env.NEXT_PUBLIC_ENS_REGISTRY || '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e') as `0x${string}`;
-  initIdentityClient({
-    publicClient: pub as any,
-    walletClient: wal as any,
-    agentAccount: clientAccount as any,
-    ensRegistry,
-  } as any);
-  const identity = getIdentityClient();
-  const resolved = await identity.getAgentIdentityByName(agentName);
-  const agentId = resolved.agentId || 0n;
+  // Use buildAgentDetail to get agent information
+  const client = await getAgenticTrustClient();
+  const agentDetail = await buildAgentDetail(client, agentName);
+  const agentId = agentDetail.agentId ? BigInt(agentDetail.agentId) : 0n;
   if (!agentId || agentId === 0n) {
     throw new Error(`Agent not found for name: ${agentName}`);
   }
@@ -770,19 +729,9 @@ export async function acceptFeedbackWithDelegation(params: {
     throw new Error('feedbackAuth is required');
   }
 
-  // add feedback to reputation registry
-  await initReputationClient({
-    publicClient: pub as any,
-    walletClient: wal as any,
-    clientAccount: (clientAccount) as any,
-    reputationRegistry: reputationRegistry as `0x${string}`,
-    ensRegistry,
-  } as any);
-
-  // feedbackAuth provided by caller
-
+  // Use official AgenticTrustClient singleton (initializes from env vars automatically)
   console.info("*************** giveFeedback with delegation yyy 2");
-  const rep = getReputationClient();
+  const rep = await getReputationClient();
   const { txHash } = await rep.giveClientFeedback({
     agentId,
     score: 100,
@@ -806,7 +755,7 @@ export async function getFeedbackAuthId(params: {
   const { clientAddress } = params;
 
 
-  const sp = buildDelegationSetup();
+  const sp = loadSessionPackage();
   const agentId = sp.agentId;
   
   let feedbackAuth = ('0x') as `0x${string}`;
@@ -818,23 +767,21 @@ export async function getFeedbackAuthId(params: {
   // signer: agent owner/operator derived from session key
   const ownerEOA = privateKeyToAccount(sp.sessionKey.privateKey);
   
-  const signerSmartAccount = await toMetaMaskSmartAccount({
-    client: publicClient,
-    chain: sepolia,
-    implementation: Implementation.Hybrid,
-    address: sp.sessionAA as `0x${string}`,
-    signatory: { account: ownerEOA as any },
-  } as any);
 
 
-  await initReputationClient({
+  // Use AgenticTrustClient singleton (provider mode)
+  const ensRegistry = (process.env.ENS_REGISTRY || process.env.NEXT_PUBLIC_ENS_REGISTRY || '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e') as `0x${string}`;
+  /*
+  await initAgenticTrustClientProvider({
     publicClient: publicClient as any,
     walletClient: walletClient as any,
-    agentAccount: (signerSmartAccount) as any,
+    agentAccount: signerSmartAccount as any,
     reputationRegistry: sp.reputationRegistry as `0x${string}`,
-  } as any);
+    ensRegistry,
+  });
+  */
 
-  const rep = getReputationClient();
+  const rep = await getReputationClient();
 
   const nowSec = BigInt(Math.floor(Date.now() / 1000));
   const chainId = BigInt(publicClient.chain?.id ?? 0);
@@ -869,6 +816,21 @@ export async function getFeedbackAuthId(params: {
 }
 
 
+// Helper to serialize BigInt values for JSON.stringify
+function serializeBigInt(obj: any): any {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj === 'bigint') return obj.toString();
+  if (Array.isArray(obj)) return obj.map(serializeBigInt);
+  if (typeof obj === 'object') {
+    const result: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = serializeBigInt(value);
+    }
+    return result;
+  }
+  return obj;
+}
+
 // Skill implementation: agent.feedback.requestAuth
 export async function requestFeedbackAuth(params: {
   agentId?: bigint;
@@ -878,56 +840,32 @@ export async function requestFeedbackAuth(params: {
   indexLimit?: bigint;
   expirySeconds?: number;
 }): Promise<{ signature: `0x${string}`; signerAddress: `0x${string}` }> {
-  const sp = buildDelegationSetup();
-  const agentId = params.agentId || BigInt(sp.agentId);
+  // Serialize BigInt values before logging
+  const serializableParams = serializeBigInt(params);
+  console.info(`********* [MovieAgent] requestAuthabcasss: ${JSON.stringify(serializableParams)}`);
 
-  const walletClient = createWalletClient({ chain: sepolia, transport: http(sp.rpcUrl) }) as any;
-  const publicClient = createPublicClient({ chain: sepolia, transport: http(sp.rpcUrl) });
+  const client = await getAgenticTrustClient();
 
-  // signer: agent owner/operator derived from session key
-  const ownerEOA = privateKeyToAccount(sp.sessionKey.privateKey);
-  const signerSmartAccount = await toMetaMaskSmartAccount({
-    client: publicClient,
-    chain: sepolia,
-    implementation: Implementation.Hybrid,
-    address: sp.sessionAA as `0x${string}`,
-    signatory: { account: ownerEOA as any },
-  } as any);
+  console.info("........... load session package ");
+  const sessionPackage = loadSessionPackage();
+  console.info("........... sessionPackage ........ 1234: ", sessionPackage);
+  const agentIdForRequest = sessionPackage.agentId.toString();
 
-  await initReputationClient({
-    publicClient: publicClient as any,
-    walletClient: walletClient as any,
-    agentAccount: (signerSmartAccount) as any,
-    reputationRegistry: sp.reputationRegistry as `0x${string}`,
-
-  } as any);
-  const rep = getReputationClient();
-
-  const nowSec = BigInt(Math.floor(Date.now() / 1000));
-  const chainId = BigInt(publicClient.chain?.id ?? 0);
-  const U64_MAX = 18446744073709551615n;
-
-  const lastIndexFetched = await rep.getLastIndex(BigInt(agentId), params.clientAddress);
-  console.info("###################### lastIndexFetched", lastIndexFetched);
-  const lastIndex = lastIndexFetched;
-  let indexLimit = lastIndex + 1n;
-  let expiry = nowSec + BigInt(Number(params.expirySeconds || process.env.ERC8004_FEEDBACKAUTH_TTL_SEC || 3600));
-  if (expiry > U64_MAX) expiry = U64_MAX;
-
-  console.info("###################### indexLimit", indexLimit);
+  console.info("........... agentIdForRequest ........ 1234: ", agentIdForRequest);
+  const agent = agentIdForRequest ? await client.agents.getAgent(agentIdForRequest) : null;
+  console.info("........... agent ........ 1234: ", agent);
+  console.info("........... sp.agentId ........ 1234: ", sp.agentId);
+  console.info("........... params.clientAddress ........ 1234: ", params.clientAddress);
+          
+  const feedbackAuthResponse = await agent.feedback.requestAuth({
+    clientAddress: params.clientAddress,
+    agentId: sp.agentId,
+    skillId: 'agent.feedback.requestAuth',
+    expirySeconds: params.expirySeconds
+  });
+  console.info("........... feedbackAuthResponse ........ 1234: ", feedbackAuthResponse);
 
 
 
-  const identityReg = await rep.getIdentityRegistry();
-  const feedbackAuth = await rep.signFeedbackAuth({
-    agentId,
-    clientAddress: params.clientAddress as `0x${string}`,
-    indexLimit,
-    expiry,
-    chainId,
-    identityRegistry: identityReg as `0x${string}`,
-    signerAddress: sp.sessionAA as `0x${string}`,
-  } as any) as `0x${string}`;
-
-  return { signature: feedbackAuth, signerAddress: sp.sessionAA as `0x${string}` };
+  return { signature: feedbackAuthResponse.feedbackAuth, signerAddress: sp.sessionAA as `0x${string}` };
 }

@@ -4,21 +4,29 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:backend": "tsx server.ts",
+    "dev:all": "concurrently \"npm run dev:backend\" \"npm run dev\" --names \"backend,frontend\" --prefix-colors \"blue,green\"",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "deploy": "npm run build && wrangler pages deploy dist --project-name movie-client-ui"
   },
   "dependencies": {
+    "@agentic-trust/core": "^1.0.15",
+    "@agentic-trust/8004-sdk": "^1.0.15",
+    "@agentic-trust/8004-ext-sdk": "^1.0.15",
     "@a2a-js/sdk": "^0.2.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "uuid": "^11.0.3",
-    "viem": "^2.31.4"
+    "viem": "^2.31.4",
+    "express": "^4.21.2",
+    "dotenv": "^17.2.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
     "@types/uuid": "^9.0.7",
+    "@types/express": "^5.0.1",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.16",
     "postcss": "^8.4.32",
@@ -26,9 +34,8 @@
     "typescript": "^5.3.3",
     "vite": "^5.0.8",
     "wrangler": "^4.45.1",
-    "@erc8004/sdk": "file:/home/barb/erc8004/erc-8004-identity-indexer/apps/erc8004-src",
-    "@erc8004/agentic-trust-sdk": "file:/home/barb/erc8004/erc-8004-identity-indexer/apps/erc8004-agentic-trust-sdk"
-
+    "tsx": "^4.19.3",
+    "concurrently": "^9.1.0"
   }
 
 }

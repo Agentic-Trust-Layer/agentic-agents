@@ -1,4 +1,5 @@
 // Simplified session management for Cloudflare Pages
+/*
 export function buildDelegationSetup() {
   // Simplified implementation for Cloudflare Pages
   return {
@@ -30,3 +31,4 @@ export function buildDelegationSetup() {
     }
   };
 }
+  */
