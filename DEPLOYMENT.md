@@ -66,13 +66,13 @@ Since web-client uses Express.js, consider deploying to:
 
 ```bash
 # Cloudflare Workers
-wrangler secret put CLIENT_PRIVATE_KEY
+wrangler secret put CLIENT_WALLET_EOA_PRIVATE_KEY
 wrangler secret put RPC_URL
 wrangler secret put REPUTATION_REGISTRY
 wrangler secret put GRAPHQL_URL  # Optional
 
 # Or for Railway/Render/etc, set in their dashboard:
-CLIENT_PRIVATE_KEY=0x...
+CLIENT_WALLET_EOA_PRIVATE_KEY=0x...
 RPC_URL=https://rpc.sepolia.org
 REPUTATION_REGISTRY=0x...
 ERC8004_CHAIN_ID=11155111

@@ -22,7 +22,7 @@ Deploy as a Cloudflare Worker that handles API endpoints.
 
 2. Set environment variables in Cloudflare:
    ```bash
-   wrangler secret put CLIENT_PRIVATE_KEY
+   wrangler secret put AGENT_EOA_PRIVATE_KEY
    wrangler secret put RPC_URL
    wrangler secret put REPUTATION_REGISTRY
    wrangler secret put GRAPHQL_URL  # Optional
@@ -47,7 +47,7 @@ Then update `VITE_WEB_CLIENT_URL` in movie-client-ui to point to your deployed b
 
 Set these in Cloudflare Workers secrets:
 
-- `CLIENT_PRIVATE_KEY` - Your client private key (0x-prefixed hex)
+- `AGENT_EOA_PRIVATE_KEY` - Your agent EOA private key (0x-prefixed hex)
 - `RPC_URL` - Ethereum RPC endpoint (default: https://rpc.sepolia.org)
 - `REPUTATION_REGISTRY` - ERC-8004 Reputation Registry address
 - `ENS_REGISTRY` - ENS Registry address (default: 0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e)

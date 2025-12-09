@@ -23,6 +23,91 @@ interface FeedbackDialogProps {
   agentName?: string
 }
 
+interface ConnectionErrorDialogProps {
+  isOpen: boolean
+  onClose: () => void
+  agentUrl: string
+}
+
+function ConnectionErrorDialog({ isOpen, onClose, agentUrl }: ConnectionErrorDialogProps) {
+  if (!isOpen) return null
+
+  // Extract hostname and port from URL
+  const url = new URL(agentUrl)
+  const hostname = url.hostname
+  const port = url.port || (url.protocol === 'https:' ? '443' : '80')
+  const needsHostsEntry = hostname !== 'localhost' && hostname !== '127.0.0.1'
+
+  return (
+    <div 
+      className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div 
+        className="bg-gray-800 rounded-lg p-6 max-w-2xl w-full mx-4 border border-red-500/50 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start space-x-4 mb-4">
+          <div className="flex-shrink-0 w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center">
+            <span className="text-2xl">⚠️</span>
+          </div>
+          <div className="flex-1">
+            <h2 className="text-2xl font-bold text-white mb-2">Failed to Connect to Movie Agent</h2>
+            <p className="text-gray-300">
+              Unable to reach the movie agent at <code className="bg-gray-700 px-2 py-1 rounded text-sm">{agentUrl}</code>
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-4 mb-6">
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
+            <h3 className="text-lg font-semibold text-blue-300 mb-2">1. Start the Movie Agent</h3>
+            <p className="text-gray-300 mb-2">Make sure your movie agent is running. From the project root, run:</p>
+            <div className="bg-gray-900 rounded p-3 font-mono text-sm text-green-400 mb-2">
+              <div>cd src/agents/movie-agent</div>
+              <div>PORT=5002 pnpm dev</div>
+            </div>
+            <p className="text-gray-400 text-sm">Or from the project root:</p>
+            <div className="bg-gray-900 rounded p-3 font-mono text-sm text-green-400">
+              <div>PORT=5002 pnpm agents:movie-agent</div>
+            </div>
+          </div>
+
+          {needsHostsEntry && (
+            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
+              <h3 className="text-lg font-semibold text-yellow-300 mb-2">2. Configure Hostname Resolution</h3>
+              <p className="text-gray-300 mb-2">
+                If you haven't configured access to <code className="bg-gray-700 px-2 py-1 rounded text-sm">{hostname}:{port}</code>, 
+                you need to add it to your <code className="bg-gray-700 px-2 py-1 rounded text-sm">/etc/hosts</code> file:
+              </p>
+              <div className="bg-gray-900 rounded p-3 font-mono text-sm text-green-400 mb-2">
+                {`echo "127.0.0.1 ${hostname}" | sudo tee -a /etc/hosts`}
+              </div>
+              <p className="text-gray-400 text-sm">
+                This maps <code className="bg-gray-700 px-1 rounded">{hostname}</code> to <code className="bg-gray-700 px-1 rounded">localhost</code>.
+              </p>
+            </div>
+          )}
+
+          <div className="bg-gray-700/50 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-gray-300 mb-2">Expected Agent Card URL:</h3>
+            <code className="text-sm text-gray-400 break-all">{agentUrl}/.well-known/agent-card.json</code>
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-6 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg transition-colors font-medium"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function FeedbackDialog({ isOpen, onClose, onSubmit, agentName }: FeedbackDialogProps) {
   const [rating, setRating] = useState(5)
   const [comment, setComment] = useState('')
@@ -148,6 +233,7 @@ function App() {
   const [currentTaskId, setCurrentTaskId] = useState<string | undefined>()
   const [currentContextId, setCurrentContextId] = useState<string | undefined>()
   const [showFeedbackDialog, setShowFeedbackDialog] = useState(false)
+  const [showConnectionErrorDialog, setShowConnectionErrorDialog] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const clientRef = useRef<A2AClient | null>(null)
 
@@ -173,7 +259,20 @@ function App() {
           status: 'completed'
         }])
       } catch (err: any) {
-        setError(`Failed to connect: ${err.message}`)
+        const errorMsg = err.message || 'Unknown error'
+        // Check if it's a connection/fetch error
+        if (
+          errorMsg.includes('Failed to fetch') ||
+          errorMsg.includes('ERR_CONNECTION_REFUSED') ||
+          errorMsg.includes('NetworkError') ||
+          errorMsg.includes('network') ||
+          errorMsg.includes('CORS') ||
+          err.name === 'TypeError'
+        ) {
+          setShowConnectionErrorDialog(true)
+        } else {
+          setError(`Failed to connect: ${errorMsg}`)
+        }
       }
     }
     init()
@@ -669,6 +768,13 @@ function App() {
         onClose={() => setShowFeedbackDialog(false)}
         onSubmit={handleFeedbackSubmit}
         agentName={agentCard?.name}
+      />
+
+      {/* Connection Error Dialog */}
+      <ConnectionErrorDialog
+        isOpen={showConnectionErrorDialog}
+        onClose={() => setShowConnectionErrorDialog(false)}
+        agentUrl={MOVIE_AGENT_URL}
       />
     </div>
   )

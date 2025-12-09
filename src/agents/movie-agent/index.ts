@@ -337,7 +337,7 @@ class MovieAgentExecutor implements AgentExecutor {
 
 // Get agent name from environment variables
 const agentName = process.env.AGENT_NAME || process.env.MOVIE_AGENT_NAME || 'Movie Agent';
-const agentUrl = process.env.AGENT_URL || `http://${process.env.HOST || 'movieagent.localhost'}:${process.env.PORT || 41241}/`;
+const agentUrl = process.env.AGENT_URL || `http://${process.env.HOST || 'localhost'}:${process.env.PORT || 41241}/`;
 
 const movieAgentCard: AgentCard = {
   name: agentName,
@@ -583,10 +583,11 @@ async function main() {
   // 5. Start the server
   console.info("*************** start the server");
   const PORT = Number(process.env.PORT) || 41241;
-  const HOST = process.env.HOST || 'movieagent.localhost';
+  const HOST = process.env.HOST || '0.0.0.0'; // Use 0.0.0.0 to bind to all interfaces, or 'localhost' for local only
   expressApp.listen(PORT, HOST, () => {
-    console.log(`[MovieAgent] Server using new framework started on http://${HOST}:${PORT}`);
-    console.log(`[MovieAgent] Agent Card: http://${HOST}:${PORT}/.well-known/agent-card.json`);
+    const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
+    console.log(`[MovieAgent] Server using new framework started on http://${displayHost}:${PORT}`);
+    console.log(`[MovieAgent] Agent Card: http://${displayHost}:${PORT}/.well-known/agent-card.json`);
     console.log('[MovieAgent] Press Ctrl+C to stop the server');
   });
 }

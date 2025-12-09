@@ -436,9 +436,9 @@ export async function giveFeedbackWithDelegation(params: {
   console.info("*************** sp.agentId", agentId);
 
 
-  const clientPrivateKey = (process.env.CLIENT_PRIVATE_KEY || '').trim() as `0x${string}`;
+  const clientPrivateKey = (process.env.AGENT_EOA_PRIVATE_KEY || '').trim() as `0x${string}`;
   if (!clientPrivateKey || !clientPrivateKey.startsWith('0x')) {
-    throw new Error('CLIENT_PRIVATE_KEY not set or invalid. Please set a 0x-prefixed 32-byte hex in .env');
+    throw new Error('AGENT_EOA_PRIVATE_KEY not set or invalid. Please set a 0x-prefixed 32-byte hex in .env');
   }
   const clientAccount = privateKeyToAccount(clientPrivateKey);
   const clientAddress = clientAccount.address as `0x${string}`;
@@ -627,9 +627,9 @@ export async function addFeedback(params: {
         const repReg = (process.env.REPUTATION_REGISTRY || process.env.ERC8004_REPUTATION_REGISTRY || '').trim() as `0x${string}`;
         if (!repReg) throw new Error('REPUTATION_REGISTRY env var is required to submit on-chain feedback');
 
-        const clientPrivateKey = (process.env.CLIENT_PRIVATE_KEY || '').trim() as `0x${string}`;
+        const clientPrivateKey = (process.env.AGENT_EOA_PRIVATE_KEY || '').trim() as `0x${string}`;
         if (!clientPrivateKey || !clientPrivateKey.startsWith('0x')) {
-          throw new Error('CLIENT_PRIVATE_KEY not set or invalid. Please set a 0x-prefixed 32-byte hex in .env');
+          throw new Error('AGENT_EOA_PRIVATE_KEY not set or invalid. Please set a 0x-prefixed 32-byte hex in .env');
         }
 
         const walletClient = createWalletClient({ chain: sepolia, transport: http(rpcUrl) }) as any;

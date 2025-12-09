@@ -131,7 +131,7 @@ To change this, edit the `MOVIE_AGENT_URL` constant in `src/App.tsx`.
 
 The feedback feature is **self-contained** within this project. The backend server (`server.ts`) handles:
 
-1. **Security**: Securely handles `CLIENT_PRIVATE_KEY` (never exposed to frontend)
+1. **Security**: Securely handles `CLIENT_WALLET_EOA_PRIVATE_KEY` (never exposed to frontend)
 2. **Blockchain Operations**: Submits feedback on-chain (ERC-8004) which requires signing transactions
 3. **ENS Resolution**: Resolves agent names to agent IDs via blockchain
 4. **A2A Integration**: Works directly with A2A agents (like movie-agent) to get feedbackAuth
@@ -141,7 +141,7 @@ The feedback feature is **self-contained** within this project. The backend serv
 1. Ensure the backend is running (it's included when you run `npm run dev:all`)
 2. Set environment variables in `.env` file:
    ```bash
-   CLIENT_PRIVATE_KEY=0x...
+   CLIENT_WALLET_EOA_PRIVATE_KEY=0x...
    RPC_URL=https://rpc.sepolia.org
    REPUTATION_REGISTRY=0x...
    ERC8004_CHAIN_ID=11155111

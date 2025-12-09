@@ -76,7 +76,7 @@ application.
 
 Developers are responsible for implementing appropriate security measures, such as
 input validation and secure handling of credentials to protect their systems and users.
-
-
-
 echo "127.0.0.1 movieagent.localhost" | sudo tee -a /etc/hosts
+
+
+

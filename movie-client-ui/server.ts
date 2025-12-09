@@ -261,10 +261,10 @@ async function resolveAgentIdByName(agentName: string): Promise<bigint | null> {
   }
 }
 
-// Get client address derived from CLIENT_PRIVATE_KEY in env
+// Get client address derived from CLIENT_WALLET_EOA_PRIVATE_KEY in env
 app.get('/api/config/client-address', (req, res) => {
   try {
-    const clientPrivateKey = (process.env.CLIENT_PRIVATE_KEY || '').trim() as `0x${string}`;
+    const clientPrivateKey = (process.env.CLIENT_WALLET_EOA_PRIVATE_KEY || '').trim() as `0x${string}`;
     if (!clientPrivateKey || !clientPrivateKey.startsWith('0x') || clientPrivateKey.length !== 66) {
       return res.json({ clientAddress: '' });
     }
@@ -396,9 +396,9 @@ app.post('/api/feedback', async (req, res) => {
     // Resolve feedbackAuth if client provided agentName but no feedbackAuth
     let finalFeedbackAuthId = feedbackAuthFromClient || '';
     if (!finalFeedbackAuthId && agentName) {
-      const clientPrivateKey = (process.env.CLIENT_PRIVATE_KEY || '').trim() as `0x${string}`;
+      const clientPrivateKey = (process.env.CLIENT_WALLET_EOA_PRIVATE_KEY || '').trim() as `0x${string}`;
       if (!clientPrivateKey || !clientPrivateKey.startsWith('0x')) {
-        throw new Error('CLIENT_PRIVATE_KEY not set or invalid. Please set a 0x-prefixed 32-byte hex in .env');
+        throw new Error('CLIENT_WALLET_EOA_PRIVATE_KEY not set or invalid. Please set a 0x-prefixed 32-byte hex in .env');
       }
       const clientAccount = privateKeyToAccount(clientPrivateKey);
       // taskRef is required - use taskId if provided, otherwise generate a default
@@ -450,9 +450,9 @@ app.get('/api/feedback/accept', async (req, res) => {
       return res.status(400).json({ error: 'feedbackAuth is required' });
     }
 
-    const clientPrivateKey = (process.env.CLIENT_PRIVATE_KEY || '').trim() as `0x${string}`;
+    const clientPrivateKey = (process.env.CLIENT_WALLET_EOA_PRIVATE_KEY || '').trim() as `0x${string}`;
     if (!clientPrivateKey || !clientPrivateKey.startsWith('0x')) {
-      throw new Error('CLIENT_PRIVATE_KEY not set or invalid. Please set a 0x-prefixed 32-byte hex in .env');
+      throw new Error('CLIENT_WALLET_EOA_PRIVATE_KEY not set or invalid. Please set a 0x-prefixed 32-byte hex in .env');
     }
     const clientAccount = privateKeyToAccount(clientPrivateKey);
 
