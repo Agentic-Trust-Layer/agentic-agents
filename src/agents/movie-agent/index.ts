@@ -425,16 +425,18 @@ async function main() {
   // 4. Create and setup A2AExpressApp
   console.info("*************** create A2AExpressApp");
   const appBuilder = new A2AExpressApp(requestHandler);
-  const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:4002,http://movieclient.localhost:3000')
+  const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:4002,http://localhost:4003,http://localhost:5173,http://movieclient.localhost:3000')
     .split(',')
     .map(o => o.trim())
     .filter(o => o.length > 0);
 
   console.info("*************** create express app");
   const app = express() as any;
-  app.use(cors({ origin: allowedOrigins }));
+  // If CORS_ORIGINS includes "*", reflect request origin (dev-friendly).
+  const allowAnyOrigin = allowedOrigins.includes('*');
+  app.use(cors({ origin: allowAnyOrigin ? true : allowedOrigins }));
   console.info("*************** setup routes");
-  const expressApp = appBuilder.setupRoutes(app);
+  const expressApp = appBuilder.setupRoutes(app, "", undefined, ".well-known/agent.json");
 
   // 4.5. Agent card endpoint is handled automatically by A2AExpressApp.setupRoutes()
   // No need for custom endpoint - A2AExpressApp serves it from the requestHandler
