@@ -2,7 +2,7 @@ import { createPublicClient, createWalletClient, custom, http, defineChain, enco
 import { identityRegistryAbi } from "../../lib/abi/identityRegistry.js";
 import { initReputationClient, getReputationClient as getReputationClientLegacy, initIdentityClient, getIdentityClient } from './clientProvider.js';
 // @ts-expect-error - TypeScript module resolution issue, but exports exist at runtime
-import { getReputationClient, buildAgentDetail, getAgenticTrustClient, loadSessionPackage} from '@agentic-trust/core/server';
+import { getAgenticTrustClient, loadSessionPackage } from '@agentic-trust/core/server';
 import { reputationRegistryAbi } from "../../lib/abi/reputationRegistry.js";
 import { createBundlerClient, createPaymasterClient } from 'viem/account-abstraction';
 
@@ -12,6 +12,34 @@ import { sepolia } from "viem/chains";
 
 import { ethers } from 'ethers';
 import IpfsService from '../../services/ipfs.js';
+
+function getEnsRegistryFromEnv(): `0x${string}` {
+  return (process.env.ENS_REGISTRY ||
+    process.env.NEXT_PUBLIC_ENS_REGISTRY ||
+    '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e') as `0x${string}`;
+}
+
+async function getReputationClientInitialized(params: {
+  publicClient: PublicClient;
+  walletClient?: any;
+  agentAccount?: Account;
+  clientAccount?: Account;
+  reputationRegistry: `0x${string}`;
+  ensRegistry?: `0x${string}`;
+}) {
+  try {
+    return getReputationClientLegacy();
+  } catch {}
+  await initReputationClient({
+    publicClient: params.publicClient,
+    walletClient: params.walletClient,
+    agentAccount: params.agentAccount,
+    clientAccount: params.clientAccount,
+    reputationRegistry: params.reputationRegistry,
+    ensRegistry: params.ensRegistry ?? getEnsRegistryFromEnv(),
+  });
+  return getReputationClientLegacy();
+}
 
 
 
@@ -50,15 +78,13 @@ export async function createFeedbackAuth(params: {
     chainIdOverride,
   } = params;
 
-  // Use official AgenticTrustClient singleton (initializes from env vars automatically)
-  // Fall back to legacy client if needed
-  let rep;
-  try {
-    rep = await getReputationClient();
-  } catch {
-    rep = getReputationClient();
-  }
-  const identityReg = await rep.getIdentityRegistry();
+  const rep = await getReputationClientInitialized({
+    publicClient,
+    walletClient,
+    agentAccount: signer,
+    reputationRegistry,
+  });
+  const identityReg = (await rep.getIdentityRegistry?.()) || (await fetchIdentityRegistry(publicClient, reputationRegistry));
 
   // Ensure IdentityRegistry operator approvals are configured for sessionAA
   console.info("**********************************")
@@ -469,8 +495,12 @@ export async function giveFeedbackWithDelegation(params: {
 
 
 
-    // Use official AgenticTrustClient singleton (initializes from env vars automatically)
-    const rep = await getReputationClient();
+    const rep = await getReputationClientInitialized({
+      publicClient,
+      walletClient,
+      agentAccount: ownerEOA as any,
+      reputationRegistry: sp.reputationRegistry as `0x${string}`,
+    });
 
 
 
@@ -549,7 +579,12 @@ export async function giveFeedbackWithDelegation(params: {
 
   // Use official AgenticTrustClient singleton (initializes from env vars automatically)
   console.info("*************** giveFeedback with delegation yyy 1");
-  const rep = await getReputationClient();
+  const rep = await getReputationClientInitialized({
+    publicClient,
+    walletClient,
+    clientAccount: clientAccount as any,
+    reputationRegistry: sp.reputationRegistry as `0x${string}`,
+  });
   const { txHash } = await rep.giveClientFeedback({
     agentId,
     score,
@@ -636,8 +671,12 @@ export async function addFeedback(params: {
         const publicClient = createPublicClient({ chain: sepolia, transport: http(rpcUrl) });
         const clientAccount = privateKeyToAccount(clientPrivateKey);
 
-        // Use official AgenticTrustClient singleton (initializes from env vars automatically)
-        const rep = await getReputationClient();
+        const rep = await getReputationClientInitialized({
+          publicClient,
+          walletClient,
+          clientAccount: clientAccount as any,
+          reputationRegistry: repReg,
+        });
         const zeroBytes32 = '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`;
         const ratingPctForChain = Math.max(0, Math.min(100, rating * 20));
 
@@ -715,14 +754,17 @@ export async function acceptFeedbackWithDelegation(params: {
     throw new Error(`Invalid REPUTATION_REGISTRY address: ${repRegRaw}`);
   }
 
-
-  // Use buildAgentDetail to get agent information
-  const client = await getAgenticTrustClient();
-  const agentDetail = await buildAgentDetail(client, agentName);
-  const agentId = agentDetail.agentId ? BigInt(agentDetail.agentId) : 0n;
-  if (!agentId || agentId === 0n) {
-    throw new Error(`Agent not found for name: ${agentName}`);
-  }
+  // Resolve agentId from the IdentityRegistry using the provided agentName (domain)
+  const rep = await getReputationClientInitialized({
+    publicClient: pub,
+    walletClient: wal,
+    clientAccount: clientAccount as any,
+    reputationRegistry,
+  });
+  const identityReg = (await rep.getIdentityRegistry?.()) || (await fetchIdentityRegistry(pub, reputationRegistry));
+  const info = await getAgentInfoByDomain({ publicClient: pub, registry: identityReg as `0x${string}`, domain: agentName });
+  const agentId = info?.agentId ?? 0n;
+  if (!agentId || agentId === 0n) throw new Error(`Agent not found for domain: ${agentName}`);
 
   // Use provided feedbackAuth; do not derive here
   if (!feedbackAuth || feedbackAuth === '0x') {
@@ -731,7 +773,6 @@ export async function acceptFeedbackWithDelegation(params: {
 
   // Use official AgenticTrustClient singleton (initializes from env vars automatically)
   console.info("*************** giveFeedback with delegation yyy 2");
-  const rep = await getReputationClient();
   const { txHash } = await rep.giveClientFeedback({
     agentId,
     score: 100,
@@ -781,7 +822,12 @@ export async function getFeedbackAuthId(params: {
   });
   */
 
-  const rep = await getReputationClient();
+  const rep = await getReputationClientInitialized({
+    publicClient,
+    walletClient,
+    agentAccount: ownerEOA as any,
+    reputationRegistry: sp.reputationRegistry as `0x${string}`,
+  });
 
   const nowSec = BigInt(Math.floor(Date.now() / 1000));
   const chainId = BigInt(publicClient.chain?.id ?? 0);

@@ -107,8 +107,8 @@ async function resolveFeedbackAuth(params: { clientAddress: string; agentName: s
     if (agentDetail.endpoints && Array.isArray(agentDetail.endpoints)) {
       const a2aEndpoint = agentDetail.endpoints.find((ep: any) => ep.name === 'A2A');
       if (a2aEndpoint?.endpoint) {
-        // Extract base URL from endpoint (remove /.well-known/agent-card.json if present)
-        agentUrl = a2aEndpoint.endpoint.replace(/\/\.well-known\/agent-card\.json\/?$/, '');
+        // Extract base URL from endpoint (remove /.well-known/agent.json if present)
+        agentUrl = a2aEndpoint.endpoint.replace(/\/\.well-known\/agent\.json\/?$/, '');
       }
     }
     
@@ -116,8 +116,8 @@ async function resolveFeedbackAuth(params: { clientAddress: string; agentName: s
     if (!agentUrl && agentDetail.identityRegistration?.registration?.endpoints) {
       const a2aEndpoint = agentDetail.identityRegistration.registration.endpoints.find((ep: any) => ep.name === 'A2A');
       if (a2aEndpoint?.endpoint) {
-        // Extract base URL from endpoint (remove /.well-known/agent-card.json if present)
-        agentUrl = a2aEndpoint.endpoint.replace(/\/\.well-known\/agent-card\.json\/?$/, '');
+        // Extract base URL from endpoint (remove /.well-known/agent.json if present)
+        agentUrl = a2aEndpoint.endpoint.replace(/\/\.well-known\/agent\.json\/?$/, '');
       }
     }
     console.info(`[MovieClientUI] Agent URL from buildAgentDetail: ${agentUrl}`);
@@ -159,7 +159,7 @@ async function resolveFeedbackAuth(params: { clientAddress: string; agentName: s
   const base = agentUrl.replace(/\/+$/, '');
 
   // Verify agent card and skill availability
-  const cardResp = await fetch(`${base}/.well-known/agent-card.json`).catch(() => null);
+  const cardResp = await fetch(`${base}/.well-known/agent.json`).catch(() => null);
   if (!cardResp || !cardResp.ok) throw new Error(`Failed to load agent card from ${base}`);
   const card = await cardResp.json().catch(() => ({}));
   const skills: any[] = Array.isArray(card?.skills) ? card.skills : [];

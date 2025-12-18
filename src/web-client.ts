@@ -55,7 +55,7 @@ async function resolveFeedbackAuth(params: { clientAddress: string; agentName: s
   const idInfo = await identity.getAgentIdentityByName(agentName);
   const agentIdResolved = idInfo?.agentId;
   const base = agentUrl.replace(/\/+$/, '');
-  const cardResp = await fetch(`${base}/.well-known/agent-card.json`).catch(() => null);
+  const cardResp = await fetch(`${base}/.well-known/agent.json`).catch(() => null);
   if (!cardResp || !cardResp.ok) throw new Error('Failed to load agent card');
   const card = await cardResp.json().catch(() => ({}));
   const skills: any[] = Array.isArray(card?.skills) ? card.skills : [];
@@ -114,8 +114,8 @@ app.get('/api/config/client-address', (req, res) => {
   }
 });
 
-// Agent card endpoint
-app.get('/.well-known/agent-card.json', (req, res) => {
+// Agent endpoint (preferred)
+app.get('/.well-known/agent.json', (req, res) => {
   try {
     const agentCardPath = path.join(__dirname, 'web-client-agent-card.json');
     const agentCard = JSON.parse(fs.readFileSync(agentCardPath, 'utf8'));
@@ -124,6 +124,11 @@ app.get('/.well-known/agent-card.json', (req, res) => {
     console.error('Error serving agent card:', error);
     res.status(500).json({ error: 'Failed to load agent card' });
   }
+});
+
+// Back-compat alias
+app.get('/.well-known/agent-card.json', (req, res) => {
+  res.redirect(302, '/.well-known/agent.json');
 });
 
 // Feedback endpoint
@@ -333,7 +338,7 @@ app.get('/api/feedback-auth', async (req, res) => {
 app.get('/api/movie-agent/status', async (req, res) => {
   try {
     const movieAgentUrl = process.env.MOVIE_AGENT_URL || 'https://30391b39.movie-agent.pages.dev';
-    const response = await fetch(`${movieAgentUrl}/.well-known/agent-card.json`);
+    const response = await fetch(`${movieAgentUrl}/.well-known/agent.json`);
     
     if (response.ok) {
       const agentCard = await response.json();

@@ -91,7 +91,7 @@ function ConnectionErrorDialog({ isOpen, onClose, agentUrl }: ConnectionErrorDia
 
           <div className="bg-gray-700/50 rounded-lg p-4">
             <h3 className="text-sm font-semibold text-gray-300 mb-2">Expected Agent Card URL:</h3>
-            <code className="text-sm text-gray-400 break-all">{agentUrl}/.well-known/agent-card.json</code>
+            <code className="text-sm text-gray-400 break-all">{agentUrl}/.well-known/agent.json</code>
           </div>
         </div>
 
@@ -242,7 +242,7 @@ function App() {
       try {
         // Create A2A client
         console.log('get agent card from MOVIE_AGENT_URL', MOVIE_AGENT_URL)
-        const client = new A2AClient(MOVIE_AGENT_URL, '.well-known/agent-card.json')
+        const client = new A2AClient(MOVIE_AGENT_URL, '.well-known/agent.json')
         clientRef.current = client
         
         // Fetch agent card

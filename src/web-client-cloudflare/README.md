@@ -63,7 +63,7 @@ Once deployed, the following endpoints will be available:
 - `GET /api/feedback-auth?clientAddress=...&agentName=...` - Get feedback auth
 - `POST /api/feedback` - Submit feedback
 - `GET /api/feedback?agentName=...` - Get feedback list
-- `GET /.well-known/agent-card.json` - Agent card
+- `GET /.well-known/agent.json` - Agent
 
 ## Updating movie-client-ui
 

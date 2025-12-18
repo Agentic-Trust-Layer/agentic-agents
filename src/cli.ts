@@ -49,7 +49,7 @@ function generateId(): string { // Renamed for more general use
 let currentTaskId: string | undefined = undefined; // Initialize as undefined
 let currentContextId: string | undefined = undefined; // Initialize as undefined
 const serverUrl = process.argv[2] || "https://ad226f25.movie-agent.pages.dev"; // Agent's base URL
-const client = new A2AClient(serverUrl, ".well-known/agent-card.json");
+const client = new A2AClient(serverUrl, ".well-known/agent.json");
 let agentName = "Agent"; // Default, try to get from agent card later
 
 // --- Readline Setup ---

@@ -587,7 +587,7 @@ async function main() {
   expressApp.listen(PORT, HOST, () => {
     const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
     console.log(`[MovieAgent] Server using new framework started on http://${displayHost}:${PORT}`);
-    console.log(`[MovieAgent] Agent Card: http://${displayHost}:${PORT}/.well-known/agent-card.json`);
+    console.log(`[MovieAgent] Agent: http://${displayHost}:${PORT}/.well-known/agent.json`);
     console.log('[MovieAgent] Press Ctrl+C to stop the server');
   });
 }
