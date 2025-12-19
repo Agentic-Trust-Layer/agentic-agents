@@ -8,8 +8,7 @@ import { acceptFeedbackWithDelegation, addFeedback } from "../src/agents/movie-a
 import { privateKeyToAccount } from 'viem/accounts';
 import { createPublicClient, http } from 'viem';
 import { reputationRegistryAbi } from "../src/lib/abi/reputationRegistry.js";
-import { discoverAgents, type DiscoverRequest } from '@agentic-trust/core/server';
-import { getAgenticTrustClient, buildAgentDetail, getReputationClient } from '@agentic-trust/core/server';
+import { discoverAgents, getAgenticTrustClient, type DiscoverRequest } from '@agentic-trust/core/server';
 import IpfsService from '../src/services/ipfs.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -44,6 +43,26 @@ async function resolveFeedbackAuth(params: { clientAddress: string; agentName: s
   const indexLimit = params.indexLimit ?? 1;
   const expiry = params.expirySec ?? Number(process.env.ERC8004_FEEDBACKAUTH_TTL_SEC || 3600);
 
+  // Fast path (local/dev or explicitly configured): talk to the agent directly.
+  // This avoids requiring Agentic Trust discovery credentials just to issue feedback auth.
+  if (MOVIE_AGENT_URL) {
+    const base = MOVIE_AGENT_URL.replace(/\/+$/, '');
+    try {
+      const resp = await fetch(`${base}/api/feedback-auth/${clientAddress}`);
+      if (resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        const feedbackAuthId = data?.feedbackAuthId;
+        if (feedbackAuthId) {
+          console.info(`[MovieClientUI] Using direct agent feedback-auth endpoint at ${base}`);
+          return String(feedbackAuthId);
+        }
+      }
+    } catch (e: any) {
+      console.warn(`[MovieClientUI] Direct feedback-auth endpoint call failed: ${e?.message || e}`);
+      // Continue to discovery-based flow below.
+    }
+  }
+
   // Always try ENS resolution first (for production/registered agents)
   const rpcUrl = (process.env.RPC_URL || process.env.JSON_RPC_URL || 'https://rpc.sepolia.org');
   const pub = createPublicClient({ chain: undefined as any, transport: http(rpcUrl) });
@@ -54,7 +73,11 @@ async function resolveFeedbackAuth(params: { clientAddress: string; agentName: s
   // Check if discovery URL is configured
   const discoveryUrl = (process.env.AGENTIC_TRUST_DISCOVERY_URL || '').trim();
   if (!discoveryUrl) {
-    throw new Error('AGENTIC_TRUST_DISCOVERY_URL environment variable is required for agent discovery');
+    // No discovery configured; fall back to direct agent URL if available.
+    if (MOVIE_AGENT_URL) {
+      throw new Error('AGENTIC_TRUST_DISCOVERY_URL is not set; configure discovery or use the direct agent endpoint (/api/feedback-auth/:clientAddress) which should already have been attempted.');
+    }
+    throw new Error('AGENTIC_TRUST_DISCOVERY_URL environment variable is required for agent discovery (or set MOVIE_AGENT_URL for direct agent access).');
   }
 
   // Remove '.8004-agent.eth' suffix from agent name before searching
@@ -97,48 +120,21 @@ async function resolveFeedbackAuth(params: { clientAddress: string; agentName: s
     
     // Set agentIdResolved immediately from discovery result (required, not optional)
     agentIdResolved = BigInt(discoveredAgentId);
-    
-    // Use the discovered agent ID to build agent detail
-    const client = await getAgenticTrustClient();
 
-    const agentIdString = discoveredAgentId.toString();
-    agentDetail = await buildAgentDetail(client, agentIdString);
-    // Log agentDetail without circular references (avoid JSON.stringify on objects with circular refs)
-    console.info(`************ [MovieClientUI] Agent Detail - agentId: ${agentDetail?.agentId}, agentName: ${agentDetail?.agentName}, endpoints: ${JSON.stringify(agentDetail?.endpoints || [])}`);
-
-    // Extract A2A endpoint from endpoints array (preferred)
-    // Check root-level endpoints array first
-    if (agentDetail.endpoints && Array.isArray(agentDetail.endpoints)) {
-      const a2aEndpoint = agentDetail.endpoints.find((ep: any) => ep.name === 'A2A');
-      if (a2aEndpoint?.endpoint) {
-        // Extract base URL from endpoint (remove /.well-known/agent.json if present)
-        agentUrl = a2aEndpoint.endpoint.replace(/\/\.well-known\/agent\.json\/?$/, '');
-      }
-    }
-    
-    // Fallback to identityRegistration.registration.endpoints
-    if (!agentUrl && agentDetail.identityRegistration?.registration?.endpoints) {
-      const a2aEndpoint = agentDetail.identityRegistration.registration.endpoints.find((ep: any) => ep.name === 'A2A');
-      if (a2aEndpoint?.endpoint) {
-        // Extract base URL from endpoint (remove /.well-known/agent.json if present)
-        agentUrl = a2aEndpoint.endpoint.replace(/\/\.well-known\/agent\.json\/?$/, '');
-      }
-    }
-    console.info(`[MovieClientUI] Agent URL from buildAgentDetail: ${agentUrl}`);
-    
-    // Fallback to direct properties
+    // Extract endpoint directly from discovery/search results.
+    // `AgentInfo` includes a2aEndpoint/ensEndpoint/agentAccountEndpoint.
+    agentUrl = discoveredAgent.a2aEndpoint;
     if (!agentUrl) {
-      agentUrl = agentDetail.a2aEndpoint || agentDetail.ensEndpoint || agentDetail.agentAccountEndpoint || undefined;
+      const ep = await discoveredAgent.getEndpoint().catch(() => null);
+      agentUrl = ep?.endpoint;
     }
-    // Update agentIdResolved from agentDetail if available (should match discoveredAgentId)
-    if (agentDetail.agentId) {
-      agentIdResolved = BigInt(agentDetail.agentId);
-    }
-    console.info(`[MovieClientUI] Agent URL from buildAgentDetail: ${agentUrl}, Agent ID: ${agentIdResolved}`);
+    if (agentUrl) agentUrl = agentUrl.replace(/\/\.well-known\/agent\.json\/?$/, '');
+
+    console.info(`[MovieClientUI] Agent URL from discovery: ${agentUrl}, Agent ID: ${agentIdResolved}`);
   } catch (error: any) {
     // Log error message only, avoid logging the full error object which might contain circular refs
     const errorMsg = error?.message || String(error);
-    console.warn(`[MovieClientUI] buildAgentDetail failed: ${errorMsg}`);
+    console.warn(`[MovieClientUI] discovery lookup failed: ${errorMsg}`);
     // Only log stack if it's a string (not an object with circular refs)
     if (error?.stack && typeof error.stack === 'string') {
       console.warn(`[MovieClientUI] buildAgentDetail error stack: ${error.stack.substring(0, 500)}`);
@@ -256,9 +252,7 @@ async function resolveAgentIdByName(agentName: string): Promise<bigint | null> {
       return null;
     }
 
-    const client = await getAgenticTrustClient();
-    const agentDetail = await buildAgentDetail(client, discoveredAgentId);
-    return agentDetail.agentId ? BigInt(agentDetail.agentId) : null;
+    return discoveredAgentId ? BigInt(discoveredAgentId) : null;
   } catch (error: any) {
     console.warn(`[MovieClientUI] Failed to resolve agent ID for ${agentName}: ${error.message}`);
     return null;
