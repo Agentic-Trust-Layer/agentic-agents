@@ -112,7 +112,7 @@ Set these before deploying (see README.md for full list):
 - `HOST` - Host to bind to (default: 0.0.0.0)
 - `CORS_ORIGINS` - Comma-separated allowed origins
 - `RPC_URL` - Ethereum RPC endpoint
-- `REPUTATION_REGISTRY` - ERC-8004 registry address
+- `AGENTIC_TRUST_REPUTATION_REGISTRY_SEPOLIA` - ERC-8004 registry address (Sepolia)
 - `MOVIE_AGENT_OPERATOR_KEY` - Server private key for AP2 signing
 
 ## Deployment URL

@@ -23,7 +23,7 @@ echo "TMDB_API_KEY=..." >> ../../.env # v3 key
 
 ### Agent Configuration
 - **`OPENAI_MODEL`**: OpenAI model to use (default: `gpt-4o-mini`)
-- **`AGENT_NAME`** or **`MOVIE_AGENT_NAME`**: Display name for the agent (default: `Movie Agent`)
+- **`AGENT_NAME`**: Display name for the agent
 - **`AGENT_URL`**: Full URL where the agent is accessible (auto-generated from HOST and PORT if not set)
 - **`HOST`**: Host to bind the server to (default: `0.0.0.0` - binds to all interfaces)
 - **`PORT`**: Port to run the agent on (default: `41241`)
@@ -33,7 +33,7 @@ echo "TMDB_API_KEY=..." >> ../../.env # v3 key
 - **`RPC_URL`** or **`JSON_RPC_URL`**: Ethereum RPC endpoint (default: `https://rpc.sepolia.org`)
 - **`ERC8004_CHAIN_ID`**: Chain ID for ERC-8004 operations (default: `11155111` for Sepolia)
 - **`ERC8004_CHAIN_HEX`**: Chain ID in hex format (default: `0xaa36a7` for Sepolia)
-- **`REPUTATION_REGISTRY`** or **`ERC8004_REPUTATION_REGISTRY`**: Address of the ERC-8004 Reputation Registry contract
+- **`AGENTIC_TRUST_REPUTATION_REGISTRY_SEPOLIA`**: Address of the ERC-8004 Reputation Registry contract (Sepolia)
 - **`ENS_REGISTRY`** or **`NEXT_PUBLIC_ENS_REGISTRY`**: ENS Registry contract address (default: `0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e`)
 - **`BUNDLER_URL`**: Account Abstraction bundler URL (e.g., Pimlico)
 - **`AGENT_EOA_PRIVATE_KEY`**: Private key for agent operations (hex format with `0x` prefix)
@@ -56,15 +56,17 @@ TMDB_API_KEY=your_tmdb_api_key_here
 # TMDB_API_TOKEN=ey...
 
 # Agent Configuration
-AGENT_NAME=Movie Agent
+AGENT_NAME=Your Agent Name
 PORT=5002
 HOST=0.0.0.0
+
+wrangler secret put AGENTIC_TRUST_SESSION_PACKAGE_JSON
 
 # Blockchain / ERC-8004 Configuration
 RPC_URL=https://rpc.sepolia.org
 ERC8004_CHAIN_ID=11155111
 ERC8004_CHAIN_HEX=0xaa36a7
-REPUTATION_REGISTRY=0x...
+AGENTIC_TRUST_REPUTATION_REGISTRY_SEPOLIA=0x...
 ENS_REGISTRY=0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e
 BUNDLER_URL=https://api.pimlico.io/v2/11155111/rpc?apikey=your_key
 AGENT_EOA_PRIVATE_KEY=0x...

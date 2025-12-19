@@ -44,8 +44,8 @@ async function resolveFeedbackAuth(params: { clientAddress: string; agentName: s
 
   const rpcUrl = (process.env.RPC_URL || process.env.JSON_RPC_URL || 'https://rpc.sepolia.org');
   const pub = createPublicClient({ chain: undefined as any, transport: http(rpcUrl) });
-  const repReg = (process.env.REPUTATION_REGISTRY || process.env.ERC8004_REPUTATION_REGISTRY || '').trim();
-  if (!repReg) throw new Error('REPUTATION_REGISTRY is required to resolve identity registry');
+  const repReg = (process.env.AGENTIC_TRUST_REPUTATION_REGISTRY_SEPOLIA || '').trim();
+  if (!repReg) throw new Error('AGENTIC_TRUST_REPUTATION_REGISTRY_SEPOLIA is required to resolve identity registry');
   const identityReg = await pub.readContract({ address: repReg as any, abi: reputationRegistryAbi as any, functionName: 'getIdentityRegistry', args: [] }) as `0x${string}`;
   const ensRegistry = (process.env.ENS_REGISTRY || process.env.NEXT_PUBLIC_ENS_REGISTRY || '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e') as `0x${string}`;
   initIdentityClient({ publicClient: pub as any, identityRegistry: identityReg as any, ensRegistry } as any);
@@ -82,8 +82,8 @@ async function resolveFeedbackAuth(params: { clientAddress: string; agentName: s
 async function resolveAgentIdByName(agentName: string): Promise<bigint | null> {
   const rpcUrl = (process.env.RPC_URL || process.env.JSON_RPC_URL || 'https://rpc.sepolia.org');
   const pub = createPublicClient({ chain: undefined as any, transport: http(rpcUrl) });
-  const repReg = (process.env.REPUTATION_REGISTRY || process.env.ERC8004_REPUTATION_REGISTRY || '').trim();
-  if (!repReg) throw new Error('REPUTATION_REGISTRY is required to resolve identity registry');
+  const repReg = (process.env.AGENTIC_TRUST_REPUTATION_REGISTRY_SEPOLIA || '').trim();
+  if (!repReg) throw new Error('AGENTIC_TRUST_REPUTATION_REGISTRY_SEPOLIA is required to resolve identity registry');
   const identityReg = await pub.readContract({ address: repReg as any, abi: reputationRegistryAbi as any, functionName: 'getIdentityRegistry', args: [] }) as `0x${string}`;
   const ensRegistry = (process.env.ENS_REGISTRY || process.env.NEXT_PUBLIC_ENS_REGISTRY || '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e') as `0x${string}`;
   initIdentityClient({ publicClient: pub as any, identityRegistry: identityReg as any, ensRegistry } as any);
@@ -410,8 +410,8 @@ app.get('/api/reputation/summary', async (req, res) => {
     // Build public client and init reputation SDK
     const rpcUrl = (process.env.RPC_URL || process.env.JSON_RPC_URL || 'https://rpc.sepolia.org');
     const pub = createPublicClient({ chain: undefined as any, transport: http(rpcUrl) });
-    const repReg = (process.env.REPUTATION_REGISTRY || process.env.ERC8004_REPUTATION_REGISTRY || '').trim();
-    if (!repReg) return res.status(500).json({ error: 'REPUTATION_REGISTRY is not configured' });
+    const repReg = (process.env.AGENTIC_TRUST_REPUTATION_REGISTRY_SEPOLIA || '').trim();
+    if (!repReg) return res.status(500).json({ error: 'AGENTIC_TRUST_REPUTATION_REGISTRY_SEPOLIA is not configured' });
     await initReputationClient({ publicClient: pub as any, reputationRegistry: repReg as `0x${string}`, ensRegistry: (process.env.ENS_REGISTRY || process.env.NEXT_PUBLIC_ENS_REGISTRY || '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e') as any } as any);
     const rep = getReputationClient() as any;
     const summary = await rep.getSummary(agentId);

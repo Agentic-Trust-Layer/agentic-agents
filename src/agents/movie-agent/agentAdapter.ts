@@ -1,7 +1,7 @@
 import { createPublicClient, createWalletClient, custom, http, defineChain, encodeFunctionData, encodeAbiParameters, keccak256, isHex, hexToBytes, sliceHex, zeroAddress, toHex, getAddress, type Address, type Chain, type PublicClient, type Account } from "viem";
 import { identityRegistryAbi } from "../../lib/abi/identityRegistry.js";
 import { initReputationClient, getReputationClient as getReputationClientLegacy, initIdentityClient, getIdentityClient } from './clientProvider.js';
-// @ts-expect-error - TypeScript module resolution issue, but exports exist at runtime
+// @ts-ignore - TS module resolution/types can vary across environments; exports exist at runtime.
 import { getAgenticTrustClient, loadSessionPackage } from '@agentic-trust/core/server';
 import { reputationRegistryAbi } from "../../lib/abi/reputationRegistry.js";
 import { createBundlerClient, createPaymasterClient } from 'viem/account-abstraction';
@@ -20,7 +20,8 @@ function getEnsRegistryFromEnv(): `0x${string}` {
 }
 
 async function getReputationClientInitialized(params: {
-  publicClient: PublicClient;
+  // viem PublicClient types vary across versions; keep this flexible.
+  publicClient: any;
   walletClient?: any;
   agentAccount?: Account;
   clientAccount?: Account;
@@ -28,7 +29,13 @@ async function getReputationClientInitialized(params: {
   ensRegistry?: `0x${string}`;
 }) {
   try {
-    return getReputationClientLegacy();
+    const existing = getReputationClientLegacy();
+    // If the caller didn't provide any signing context, reuse the existing singleton.
+    // If they DID provide signing context, re-init to ensure the singleton has a walletClient/account
+    // (otherwise tx submission can fail with "wallet client required").
+    if (!params.walletClient && !params.agentAccount && !params.clientAccount) {
+      return existing;
+    }
   } catch {}
   await initReputationClient({
     publicClient: params.publicClient,
@@ -44,7 +51,7 @@ async function getReputationClientInitialized(params: {
 
 
 
-async function fetchIdentityRegistry(publicClient: PublicClient, reputationRegistry: `0x${string}`): Promise<`0x${string}`> {
+async function fetchIdentityRegistry(publicClient: any, reputationRegistry: `0x${string}`): Promise<`0x${string}`> {
   return await publicClient.readContract({
     address: reputationRegistry,
     abi: reputationRegistryAbi,
@@ -56,7 +63,7 @@ async function fetchIdentityRegistry(publicClient: PublicClient, reputationRegis
 
 
 export async function createFeedbackAuth(params: {
-  publicClient: PublicClient;
+  publicClient: any;
   reputationRegistry: `0x${string}`;
   agentId: bigint;
   clientAddress: `0x${string}`;
@@ -353,7 +360,7 @@ export async function getAgentByDomain(params: {
 }
 
 export async function getAgentInfoByDomain(params: {
-  publicClient: PublicClient,
+  publicClient: any,
   registry: `0x${string}`,
   domain: string,
 }): Promise<{ agentId: bigint; agentAddress: `0x${string}` } | null> {
@@ -462,9 +469,18 @@ export async function giveFeedbackWithDelegation(params: {
   console.info("*************** sp.agentId", agentId);
 
 
-  const clientPrivateKey = (process.env.AGENT_EOA_PRIVATE_KEY || '').trim() as `0x${string}`;
+  // This codepath runs in the "client backend" (e.g. `movie-client-ui`), so the
+  // feedback transaction should be signed by the client's wallet, not the agent.
+  // Keep AGENT_EOA_PRIVATE_KEY as a fallback for backwards compatibility.
+  const clientPrivateKey = (
+    process.env.CLIENT_WALLET_EOA_PRIVATE_KEY ||
+    process.env.AGENT_EOA_PRIVATE_KEY ||
+    ''
+  ).trim() as `0x${string}`;
   if (!clientPrivateKey || !clientPrivateKey.startsWith('0x')) {
-    throw new Error('AGENT_EOA_PRIVATE_KEY not set or invalid. Please set a 0x-prefixed 32-byte hex in .env');
+    throw new Error(
+      'CLIENT_WALLET_EOA_PRIVATE_KEY not set or invalid. Please set a 0x-prefixed 32-byte hex in .env'
+    );
   }
   const clientAccount = privateKeyToAccount(clientPrivateKey);
   const clientAddress = clientAccount.address as `0x${string}`;
@@ -659,17 +675,30 @@ export async function addFeedback(params: {
     if (finalFeedbackAuthId && agentId && agentId > 0n) {
       try {
         const rpcUrl = (process.env.RPC_URL || process.env.JSON_RPC_URL || 'https://rpc.sepolia.org');
-        const repReg = (process.env.REPUTATION_REGISTRY || process.env.ERC8004_REPUTATION_REGISTRY || '').trim() as `0x${string}`;
-        if (!repReg) throw new Error('REPUTATION_REGISTRY env var is required to submit on-chain feedback');
+        const repReg = getReputationRegistrySepolia();
 
-        const clientPrivateKey = (process.env.AGENT_EOA_PRIVATE_KEY || '').trim() as `0x${string}`;
-        if (!clientPrivateKey || !clientPrivateKey.startsWith('0x')) {
-          throw new Error('AGENT_EOA_PRIVATE_KEY not set or invalid. Please set a 0x-prefixed 32-byte hex in .env');
-        }
+  // This codepath runs in the "client backend" (e.g. `movie-client-ui`), so the
+  // feedback transaction should be signed by the client's wallet, not the agent.
+  // Keep AGENT_EOA_PRIVATE_KEY as a fallback for backwards compatibility.
+  const clientPrivateKey = (
+    process.env.CLIENT_WALLET_EOA_PRIVATE_KEY ||
+    process.env.AGENT_EOA_PRIVATE_KEY ||
+    ''
+  ).trim() as `0x${string}`;
+  if (!clientPrivateKey || !clientPrivateKey.startsWith('0x')) {
+    throw new Error(
+      'CLIENT_WALLET_EOA_PRIVATE_KEY not set or invalid. Please set a 0x-prefixed 32-byte hex in .env'
+    );
+  }
 
-        const walletClient = createWalletClient({ chain: sepolia, transport: http(rpcUrl) }) as any;
-        const publicClient = createPublicClient({ chain: sepolia, transport: http(rpcUrl) });
         const clientAccount = privateKeyToAccount(clientPrivateKey);
+        // IMPORTANT: attach the local private-key account to the wallet client so the SDK can sign+send.
+        const walletClient = createWalletClient({
+          chain: sepolia,
+          transport: http(rpcUrl),
+          account: clientAccount,
+        }) as any;
+        const publicClient = createPublicClient({ chain: sepolia, transport: http(rpcUrl) });
 
         const rep = await getReputationClientInitialized({
           publicClient,
@@ -742,16 +771,13 @@ export async function acceptFeedbackWithDelegation(params: {
   const wal = createWalletClient({ chain: sepolia, transport: http(rpcUrl) }) as any;
   const pub = createPublicClient({ chain: sepolia, transport: http(rpcUrl) });
 
-  const repRegRaw = (process.env.REPUTATION_REGISTRY || '').trim();
-  if (!repRegRaw) {
-    throw new Error('REPUTATION_REGISTRY env var is required to accept feedback');
-  }
+  const repRegRaw = getReputationRegistrySepolia();
   let reputationRegistry: `0x${string}`;
   try {
     // Normalize to standard EIP-55 checksum (chain-agnostic) so viem validation passes
     reputationRegistry = getAddress(repRegRaw as `0x${string}`) as `0x${string}`;
   } catch (e: any) {
-    throw new Error(`Invalid REPUTATION_REGISTRY address: ${repRegRaw}`);
+    throw new Error(`Invalid AGENTIC_TRUST_REPUTATION_REGISTRY_SEPOLIA address: ${repRegRaw}`);
   }
 
   // Resolve agentId from the IdentityRegistry using the provided agentName (domain)
@@ -877,6 +903,30 @@ function serializeBigInt(obj: any): any {
   return obj;
 }
 
+function getRuntimeEnvValue(key: string): string | undefined {
+  const runtimeEnv = (globalThis as any)?.MOVIE_AGENT_ENV as Record<string, string | undefined> | undefined;
+  const v = runtimeEnv?.[key] ?? (typeof process !== 'undefined' ? (process.env as any)?.[key] : undefined);
+  return typeof v === 'string' ? v : undefined;
+}
+
+function requireRuntimeEnv(key: string): string {
+  const v = (getRuntimeEnvValue(key) || '').trim();
+  if (!v) {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+  return v;
+}
+
+function getReputationRegistrySepolia(): `0x${string}` {
+  const v = (getRuntimeEnvValue('AGENTIC_TRUST_REPUTATION_REGISTRY_SEPOLIA') || '').trim();
+  if (!v) {
+    throw new Error(
+      'Missing required environment variable: AGENTIC_TRUST_REPUTATION_REGISTRY_SEPOLIA',
+    );
+  }
+  return v as `0x${string}`;
+}
+
 // Skill implementation: agent.feedback.requestAuth
 export async function requestFeedbackAuth(params: {
   agentId?: bigint;
@@ -890,28 +940,86 @@ export async function requestFeedbackAuth(params: {
   const serializableParams = serializeBigInt(params);
   console.info(`********* [MovieAgent] requestAuthabcasss: ${JSON.stringify(serializableParams)}`);
 
+  // These are required for the AgenticTrust client + discovery-backed flows.
+  requireRuntimeEnv('AGENTIC_TRUST_DISCOVERY_URL');
+  // 8004-agent.io requires an access code; require it so we fail fast with a clear error.
+  requireRuntimeEnv('AGENTIC_TRUST_DISCOVERY_API_KEY');
+
   const client = await getAgenticTrustClient();
 
-  console.info("........... load session package ");
-  const sessionPackage = loadSessionPackage();
-  console.info("........... sessionPackage ........ 1234: ", sessionPackage);
-  const agentIdForRequest = sessionPackage.agentId.toString();
+  // Session package is required to know which agent ID / signer is issuing auth.
+  // In Workers, file system access is unreliable; require JSON via env.
+  let sp: any;
+  const runtimeEnv = (globalThis as any)?.MOVIE_AGENT_ENV as Record<string, string | undefined> | undefined;
+  if (runtimeEnv) {
+    const spJson = requireRuntimeEnv('AGENTIC_TRUST_SESSION_PACKAGE_JSON');
+    try {
+      sp = JSON.parse(spJson);
+    } catch (e: any) {
+      throw new Error(`Invalid AGENTIC_TRUST_SESSION_PACKAGE_JSON: ${e?.message || e}`);
+    }
+  } else {
+    sp = loadSessionPackage();
+  }
 
-  console.info("........... agentIdForRequest ........ 1234: ", agentIdForRequest);
-  const agent = agentIdForRequest ? await client.agents.getAgent(agentIdForRequest) : null;
+  // STRICT: ensure the caller and this server are referencing the same agent.
+  // If the client/backend resolved agentId=4476 but this Worker is configured with a session package for agentId=4475,
+  // that's a configuration error and we want a loud, clear failure.
+  if (params.agentId !== undefined && sp?.agentId !== undefined) {
+    const spAgentId = BigInt(sp.agentId);
+    if (spAgentId !== params.agentId) {
+      throw new Error(
+        `Agent mismatch: request agentId=${params.agentId.toString()} but session package agentId=${spAgentId.toString()}. ` +
+          `Update AGENTIC_TRUST_SESSION_PACKAGE_JSON to the session package for the same agent ID.`,
+      );
+    }
+  }
+
+  // Prefer the agentId provided by the caller (movie-client-ui resolves this via discovery),
+  // and fall back to the session package's agentId if omitted.
+  const agentIdForRequest =
+    (params.agentId !== undefined ? params.agentId : (sp?.agentId !== undefined ? BigInt(sp.agentId) : undefined));
+  if (agentIdForRequest === undefined) {
+    throw new Error('Missing agentId (provide agentId in request or include agentId in session package)');
+  }
+  const signerAddress = String(sp?.sessionAA ?? '').trim();
+  if (!signerAddress || !signerAddress.startsWith('0x')) {
+    throw new Error('Session package missing sessionAA');
+  }
+
+  const agentIdStr = agentIdForRequest.toString();
+  console.info("........... agentIdForRequest ........ 1234: ", agentIdStr);
+  const agent = await client.agents.getAgent(agentIdStr);
   console.info("........... agent ........ 1234: ", agent);
-  console.info("........... sp.agentId ........ 1234: ", sp.agentId);
+  console.info("........... sp.agentId ........ 1234: ", String(sp?.agentId ?? ''));
   console.info("........... params.clientAddress ........ 1234: ", params.clientAddress);
           
-  const feedbackAuthResponse = await agent.feedback.requestAuth({
+  if (!agent) {
+    throw new Error(`Agent not found for agentId=${agentIdForRequest}`);
+  }
+
+  // Wire the session package into the agent instance (server-side helper in @agentic-trust/core)
+  if (typeof (agent as any).setSessionPackage === 'function') {
+    (agent as any).setSessionPackage(sp);
+  }
+
+  // Newer SDK API: Agent.requestAuth(...)
+  if (typeof (agent as any).requestAuth !== 'function') {
+    throw new Error('Agent does not support requestAuth() in current SDK version');
+  }
+
+  const feedbackAuthResponse = await (agent as any).requestAuth({
     clientAddress: params.clientAddress,
-    agentId: sp.agentId,
+    agentId: agentIdForRequest,
+    expirySeconds: params.expirySeconds,
     skillId: 'agent.feedback.requestAuth',
-    expirySeconds: params.expirySeconds
   });
   console.info("........... feedbackAuthResponse ........ 1234: ", feedbackAuthResponse);
 
+  const feedbackAuth = feedbackAuthResponse?.feedbackAuth || feedbackAuthResponse?.feedbackAuthId;
+  if (!feedbackAuth) {
+    throw new Error('No feedbackAuth returned by requestAuth()');
+  }
 
-
-  return { signature: feedbackAuthResponse.feedbackAuth, signerAddress: sp.sessionAA as `0x${string}` };
+  return { signature: feedbackAuth as `0x${string}`, signerAddress: signerAddress as `0x${string}` };
 }

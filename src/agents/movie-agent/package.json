@@ -1,7 +1,7 @@
 {
   "name": "movie-agent",
   "version": "0.0.2",
-  "description": "Movie Agent Express Server",
+  "description": "Agent server",
   "type": "module",
   "main": "index.ts",
   "scripts": {

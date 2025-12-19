@@ -20,6 +20,10 @@ function getApp(env: any) {
 export default {
   async fetch(request: Request, env: any, ctx: ExecutionContext): Promise<Response> {
     try {
+      // Allow other modules to resolve root-relative URLs (e.g. "/secret.sessionPackage.json")
+      // against the current request origin.
+      (globalThis as any).MOVIE_AGENT_ORIGIN = new URL(request.url).origin;
+
       const app = await getApp(env);
       const response = await app.fetch(request, env, ctx);
       // Ensure we always return a Response

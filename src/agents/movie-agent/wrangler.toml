@@ -6,3 +6,19 @@ compatibility_flags = [
 ]
 # Note: nodejs_compat is needed for @agentic-trust/core and other dependencies
 
+[vars]
+# Non-secret Worker environment variables
+# These values are provided to `fetch(request, env, ctx)` as the `env` object.
+AGENT_NAME = "movie-reviewer-v2.8004-agent.eth"
+AGENTIC_TRUST_DISCOVERY_URL = "https://8004-agent.io"
+AGENTIC_TRUST_RPC_URL_SEPOLIA = "https://eth-sepolia.g.alchemy.com/v2/WvEny4nR70VTUMX0DfR-A"
+# Optional: explicitly set identity registry for Sepolia (used by some Agentic Trust SDK paths)
+AGENTIC_TRUST_IDENTITY_REGISTRY_SEPOLIA = "0x8004a6090Cd10A7288092483047B097295Fb8847"
+
+# Reputation registry (Sepolia)
+AGENTIC_TRUST_REPUTATION_REGISTRY_SEPOLIA = "0x8004B8FD1A363aa02fDC07635C0c5F94f6Af5B7E"
+
+# NOTE:
+# Do NOT put secrets in wrangler.toml. Use:
+#   wrangler secret put AGENTIC_TRUST_DISCOVERY_API_KEY
+#   wrangler secret put AGENTIC_TRUST_SESSION_PACKAGE_JSON

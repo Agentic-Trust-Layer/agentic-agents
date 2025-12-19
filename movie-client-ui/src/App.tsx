@@ -7,6 +7,8 @@ import { v4 as uuidv4 } from 'uuid'
 // IMPORTANT: Vite only exposes env vars prefixed with VITE_ to the browser.
 const MOVIE_AGENT_URL =
   import.meta.env.VITE_MOVIE_AGENT_URL || 'http://movieagent.localhost:5002'
+const AGENT_DISPLAY_NAME =
+  import.meta.env.VITE_AGENT_NAME || 'Agent'
 // Use local backend server (same port as backend)
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000'
 
@@ -54,7 +56,7 @@ function ConnectionErrorDialog({ isOpen, onClose, agentUrl }: ConnectionErrorDia
             <span className="text-2xl">⚠️</span>
           </div>
           <div className="flex-1">
-            <h2 className="text-2xl font-bold text-white mb-2">Failed to Connect to Movie Agent</h2>
+            <h2 className="text-2xl font-bold text-white mb-2">Failed to Connect to {AGENT_DISPLAY_NAME}</h2>
             <p className="text-gray-300">
               Unable to reach the movie agent at <code className="bg-gray-700 px-2 py-1 rounded text-sm">{agentUrl}</code>
             </p>
@@ -63,7 +65,7 @@ function ConnectionErrorDialog({ isOpen, onClose, agentUrl }: ConnectionErrorDia
 
         <div className="space-y-4 mb-6">
           <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-            <h3 className="text-lg font-semibold text-blue-300 mb-2">1. Start the Movie Agent</h3>
+            <h3 className="text-lg font-semibold text-blue-300 mb-2">1. Start {AGENT_DISPLAY_NAME}</h3>
             <p className="text-gray-300 mb-2">Make sure your movie agent is running. From the project root, run:</p>
             <div className="bg-gray-900 rounded p-3 font-mono text-sm text-green-400 mb-2">
               <div>cd src/agents/movie-agent</div>
@@ -256,7 +258,7 @@ function App() {
         setMessages([{
           id: uuidv4(),
           role: 'agent',
-          content: `Connected to ${card.name || 'Movie Agent'}. ${card.description || 'Ready to help with movie questions!'}`,
+          content: `Connected to ${card.name || AGENT_DISPLAY_NAME}. ${card.description || 'Ready to help!'}`,
           timestamp: new Date(),
           status: 'completed'
         }])
@@ -530,7 +532,7 @@ function App() {
     setMessages(agentCard ? [{
       id: uuidv4(),
       role: 'agent',
-      content: `New session started. Connected to ${agentCard.name || 'Movie Agent'}.`,
+      content: `New session started. Connected to ${agentCard.name || AGENT_DISPLAY_NAME}.`,
       timestamp: new Date(),
       status: 'completed'
     }] : [])
@@ -677,7 +679,7 @@ function App() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-white">
-                {agentCard?.name || 'Movie Agent'}
+                {agentCard?.name || AGENT_DISPLAY_NAME}
               </h1>
               <p className="text-sm text-gray-400">
                 {agentCard ? `${agentCard.version || 'v1.0'} • Streaming Supported` : 'Connecting...'}

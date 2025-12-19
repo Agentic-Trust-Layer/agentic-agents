@@ -74,7 +74,7 @@ import {
 } from "@a2a-js/sdk/server";
 import { A2AHonoApp } from "./hono-adapter.js";
 import { openAiToolDefinitions, openAiToolHandlers } from "./tools.js";
-import { giveFeedbackWithDelegation, getFeedbackAuthId as serverGetFeedbackAuthId, requestFeedbackAuth } from './agentAdapter.js';
+import { requestFeedbackAuth } from './agentAdapter.js';
 //import { buildDelegationSetup } from './session.js';
 
 type MovieAgentRuntimeEnv = Record<string, string | undefined>;
@@ -441,65 +441,67 @@ class MovieAgentExecutor implements AgentExecutor {
 
 // --- Server Setup ---
 
-// Get agent name from environment variables
-const agentName = process.env.AGENT_NAME || process.env.MOVIE_AGENT_NAME || 'Movie Agent';
-// Prefer explicit base URL if provided (useful for deployments)
-const agentUrl =
-  process.env.MOVIE_AGENT_URL ||
-  `http://${process.env.HOST || 'localhost'}:${process.env.PORT || 41241}/`;
+function buildMovieAgentCard(ENV: MovieAgentRuntimeEnv): AgentCard {
+  const name = (ENV.AGENT_NAME || '').trim();
+  if (!name) {
+    console.warn('[MovieAgent] AGENT_NAME is not set; using fallback name "Agent".');
+  }
 
-const movieAgentCard: AgentCard = {
-  name: agentName,
-  description: 'An agent that can answer questions about movies and actors using TMDB.',
-  // Adjust the base URL and port as needed. /a2a is the default base in A2AExpressApp
-  url: agentUrl, 
-  provider: {
-    organization: 'OrgTrust.eth',
-    url: 'https://www.richcanvas3.com' // Added provider URL
-  },
-  version: '0.0.4', // Incremented version
-  protocolVersion: '0.3.0',
-  capabilities: {
-    streaming: true, // The new framework supports streaming
-    pushNotifications: false, // Assuming not implemented for this agent yet
-    stateTransitionHistory: true, // Agent uses history
-  },
-  // authentication: null, // Property 'authentication' does not exist on type 'AgentCard'.
-  securitySchemes: undefined, // Or define actual security schemes if any
-  security: undefined,
-  defaultInputModes: ['text'],
-  defaultOutputModes: ['text', 'task-status'], // task-status is a common output mode
-  skills: [
-    {
-      id: 'general_movie_chat',
-      name: 'General Movie Chat',
-      description: 'Answer general questions or chat about movies, actors, directors.',
-      tags: ['movies', 'actors', 'directors'],
-      examples: [
-        'Tell me about the plot of Inception.',
-        'Recommend a good sci-fi movie.',
-        'Who directed The Matrix?',
-        'What other movies has Scarlett Johansson been in?',
-        'Find action movies starring Keanu Reeves',
-        'Which came out first, Jurassic Park or Terminator 2?',
-      ],
-      inputModes: ['text'], // Explicitly defining for skill
-      outputModes: ['text', 'task-status'] // Explicitly defining for skill
+  // Prefer explicit base URL if provided (useful for deployments)
+  const agentUrl =
+    (ENV.MOVIE_AGENT_URL || ENV.AGENT_URL || '').trim() ||
+    `http://${ENV.HOST || 'localhost'}:${ENV.PORT || 41241}/`;
+
+  return {
+    name: name || 'Agent',
+    description: 'An agent that can answer questions about movies and actors using TMDB.',
+    // This will be rewritten to the request origin in `hono-adapter.ts` for agent.json responses.
+    url: agentUrl,
+    provider: {
+      organization: 'OrgTrust.eth',
+      url: 'https://www.richcanvas3.com',
     },
-    {
-      id: 'agent.feedback.requestAuth',
-      name: 'agent.feedback.requestAuth',
-      description: 'Issue a signed ERC-8004 feedbackAuth for a client to submit feedback',
-      tags: ['erc8004', 'feedback', 'auth', 'a2a'],
-      examples: [
-        'Client requests feedbackAuth after receiving results',
-      ],
-      inputModes: ['text'],
-      outputModes: ['text']
+    version: '0.0.4',
+    protocolVersion: '0.3.0',
+    capabilities: {
+      streaming: true,
+      pushNotifications: false,
+      stateTransitionHistory: true,
     },
-  ],
-  supportsAuthenticatedExtendedCard: false,
-};
+    securitySchemes: undefined,
+    security: undefined,
+    defaultInputModes: ['text'],
+    defaultOutputModes: ['text', 'task-status'],
+    skills: [
+      {
+        id: 'general_movie_chat',
+        name: 'General Movie Chat',
+        description: 'Answer general questions or chat about movies, actors, directors.',
+        tags: ['movies', 'actors', 'directors'],
+        examples: [
+          'Tell me about the plot of Inception.',
+          'Recommend a good sci-fi movie.',
+          'Who directed The Matrix?',
+          'What other movies has Scarlett Johansson been in?',
+          'Find action movies starring Keanu Reeves',
+          'Which came out first, Jurassic Park or Terminator 2?',
+        ],
+        inputModes: ['text'],
+        outputModes: ['text', 'task-status'],
+      },
+      {
+        id: 'agent.feedback.requestAuth',
+        name: 'agent.feedback.requestAuth',
+        description: 'Issue a signed ERC-8004 feedbackAuth for a client to submit feedback',
+        tags: ['erc8004', 'feedback', 'auth', 'a2a'],
+        examples: ['Client requests feedbackAuth after receiving results'],
+        inputModes: ['text'],
+        outputModes: ['text'],
+      },
+    ],
+    supportsAuthenticatedExtendedCard: false,
+  };
+}
 
 /**
  * Sets up and returns the Hono app for movie-agent
@@ -510,6 +512,32 @@ export async function setupMovieAgentApp(opts?: { env?: MovieAgentRuntimeEnv }):
   RUNTIME_ENV = ENV;
   // Make env accessible to other modules (e.g., tools.js) in Cloudflare Workers runtime.
   (globalThis as any).MOVIE_AGENT_ENV = ENV;
+
+  // Bridge Cloudflare Worker env bindings -> process.env for libraries that only read process.env
+  // (e.g. @agentic-trust/core/server helpers like getAgenticTrustClient()).
+  if (typeof process !== 'undefined' && typeof process.env !== 'undefined') {
+    const keysToBridge = [
+      'AGENT_NAME',
+      'MOVIE_AGENT_URL',
+      'AGENT_URL',
+      'OPENAI_API_KEY',
+      'TMDB_API_KEY',
+      'TMDB_API_TOKEN',
+      'CORS_ORIGINS',
+      'AGENTIC_TRUST_DISCOVERY_URL',
+      'AGENTIC_TRUST_DISCOVERY_API_KEY',
+      'AGENTIC_TRUST_RPC_URL_SEPOLIA',
+      'AGENTIC_TRUST_IDENTITY_REGISTRY_SEPOLIA',
+      'AGENTIC_TRUST_REPUTATION_REGISTRY_SEPOLIA',
+      'AGENTIC_TRUST_SESSION_PACKAGE_JSON',
+    ] as const;
+    for (const k of keysToBridge) {
+      const v = ENV[k];
+      if (typeof v === 'string' && v.length > 0 && !process.env[k]) {
+        process.env[k] = v;
+      }
+    }
+  }
 
   // Check environment variables (don't exit in Cloudflare Workers environment)
   if (!ENV.OPENAI_API_KEY || !ENV.TMDB_API_KEY) {
@@ -524,18 +552,7 @@ export async function setupMovieAgentApp(opts?: { env?: MovieAgentRuntimeEnv }):
       process.exit(1);
     }
   }
-  // Attempt to submit feedback via delegation on startup (expect giveFeedback event)
-  try {
-    console.info('***************  attempt to submit feedback via delegation (expect giveFeedback event) on startup')
-
-    //const sp = buildDelegationSetup();
-    //const agentId = sp.agentId;
-
-    //await giveFeedbackWithDelegation({});
-
-  } catch (err: any) {
-    console.warn('[MovieAgent] giveFeedbackWithDelegation skipped:', err?.message || err);
-  }
+  // NOTE: This service only issues feedbackAuth tokens. It does not submit feedback on-chain.
 
   // 1. Create TaskStore
   console.info("*************** create TaskStore");
@@ -547,6 +564,7 @@ export async function setupMovieAgentApp(opts?: { env?: MovieAgentRuntimeEnv }):
 
   // 3. Create DefaultRequestHandler
   console.info("*************** create DefaultRequestHandler");
+  const movieAgentCard = buildMovieAgentCard(ENV);
   const requestHandler = new DefaultRequestHandler(
     movieAgentCard,
     taskStore,
@@ -576,11 +594,6 @@ export async function setupMovieAgentApp(opts?: { env?: MovieAgentRuntimeEnv }):
   }));
   console.info("*************** setup routes");
   const honoApp = appBuilder.setupRoutes(app, "", ".well-known/agent.json");
-  
-  // Add catch-all route to ensure all requests return a Response
-  honoApp.all('*', (c) => {
-    return c.json({ error: 'Not Found' }, 404);
-  });
 
   // 4.5. Agent card endpoint is handled automatically by A2AExpressApp.setupRoutes()
   // No need for custom endpoint - A2AExpressApp serves it from the requestHandler
@@ -590,8 +603,16 @@ export async function setupMovieAgentApp(opts?: { env?: MovieAgentRuntimeEnv }):
   honoApp.get('/api/feedback-auth/:clientAddress', async (c) => {
     try {
       const clientAddress = c.req.param('clientAddress');
-      const feedbackAuthId = await serverGetFeedbackAuthId({ clientAddress });
-      return c.json({ feedbackAuthId });
+      // Use the same requestAuth implementation as the A2A skill shim.
+      const result = await requestFeedbackAuth({
+        clientAddress: clientAddress as `0x${string}`,
+        // Let the agent use the session package agentId (and enforce mismatch checks elsewhere)
+        expirySeconds: Number(process.env.ERC8004_FEEDBACKAUTH_TTL_SEC || 3600),
+        indexLimit: 1n,
+        chainId: Number(process.env.ERC8004_CHAIN_ID || 11155111),
+        taskRef: `http-${Date.now()}`,
+      });
+      return c.json({ feedbackAuthId: result.signature });
     } catch (error: any) {
       console.error('[MovieAgent] Error getting feedback auth ID:', error?.message || error);
       return c.json({ error: error?.message || 'Internal server error' }, 500);
@@ -728,6 +749,9 @@ export async function setupMovieAgentApp(opts?: { env?: MovieAgentRuntimeEnv }):
       return c.json({ error: error?.message || 'Internal server error' }, 500);
     }
   });
+
+  // Catch-all MUST be last, otherwise it will shadow routes like /a2a/skills/* and /api/*
+  honoApp.all('*', (c) => c.json({ error: 'Not Found' }, 404));
 
   return honoApp;
 }
