@@ -19,6 +19,10 @@ const app = express();
 const PORT = Number(process.env.BACKEND_PORT) || 3000;
 const HOST = process.env.HOST || 'localhost';
 
+// Base URL for talking to the movie agent (backend-side).
+// Prefer MOVIE_AGENT_URL (new standard), fall back to AGENT_URL for backward compatibility.
+const MOVIE_AGENT_URL = (process.env.MOVIE_AGENT_URL || '').trim();
+
 // Middleware
 app.use(express.json());
 
@@ -147,12 +151,12 @@ async function resolveFeedbackAuth(params: { clientAddress: string; agentName: s
 
   // If buildAgentDetail fails, fall back to AGENT_URL (for local development)
   if (!agentUrl) {
-    const directAgentUrl = (process.env.AGENT_URL || process.env.MOVIE_AGENT_URL || '').trim();
+    const directAgentUrl = MOVIE_AGENT_URL;
     if (directAgentUrl) {
       console.info(`[MovieClientUI] Using direct agent URL fallback bbbb: ${directAgentUrl}`);
       agentUrl = directAgentUrl;
     } else {
-      throw new Error(`Could not resolve agent URL for ${agentName} and no AGENT_URL fallback configured`);
+      throw new Error(`Could not resolve agent URL for ${agentName} and no MOVIE_AGENT_URL/AGENT_URL fallback configured`);
     }
   }
 

@@ -122,10 +122,12 @@ The deployed app will be available at a URL like:
 
 ## Configuration
 
-The app is configured to use the deployed movie agent at:
-`https://b07629d5.movie-agent.pages.dev`
+The app is configured to use the movie agent URL from environment variables.
 
-To change this, edit the `MOVIE_AGENT_URL` constant in `src/App.tsx`.
+- **Frontend (Vite)**: set `VITE_MOVIE_AGENT_URL`
+- **Backend (Node/Express)**: set `MOVIE_AGENT_URL` (fallback if discovery isn’t configured/available)
+
+See `movie-client-ui/env.example` for a complete template.
 
 ### Feedback Feature
 

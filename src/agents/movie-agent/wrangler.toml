@@ -1,0 +1,8 @@
+name = "movie-agent"
+main = "cloudflare.ts"
+compatibility_date = "2024-12-19"
+compatibility_flags = [
+  "nodejs_compat"
+]
+# Note: nodejs_compat is needed for @agentic-trust/core and other dependencies
+

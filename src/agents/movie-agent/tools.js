@@ -34,8 +34,11 @@ export const openAiToolDefinitions = [
 
 // TMDB API integration
 async function callTmdbApi(endpoint, query) {
-  const apiKey = process.env.TMDB_API_KEY;
-  const apiToken = process.env.TMDB_API_TOKEN;
+  // In Cloudflare Workers, secrets/vars are provided via env bindings (not reliably via process.env).
+  // We stash the bindings on globalThis in setupMovieAgentApp().
+  const runtimeEnv = (globalThis && globalThis.MOVIE_AGENT_ENV) ? globalThis.MOVIE_AGENT_ENV : undefined;
+  const apiKey = (runtimeEnv?.TMDB_API_KEY || (typeof process !== 'undefined' ? process.env.TMDB_API_KEY : undefined));
+  const apiToken = (runtimeEnv?.TMDB_API_TOKEN || (typeof process !== 'undefined' ? process.env.TMDB_API_TOKEN : undefined));
   if (!apiKey && !apiToken) {
     throw new Error("TMDB_API_KEY or TMDB_API_TOKEN environment variable must be set");
   }

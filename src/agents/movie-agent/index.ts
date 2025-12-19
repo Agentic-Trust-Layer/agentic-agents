@@ -1,13 +1,59 @@
-import "dotenv/config";
-import express from "express";
+// Conditionally load dotenv (only in Node.js, not Cloudflare Workers)
+try {
+  if (typeof process !== 'undefined' && process.versions?.node) {
+    await import("dotenv/config");
+  }
+} catch (e) {
+  // dotenv not available (Cloudflare Workers)
+}
+
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { v4 as uuidv4 } from 'uuid';
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import OpenAI from "openai";
-import cors from "cors";
-import { randomUUID, createHash } from 'crypto';
 import { ethers } from 'ethers';
+
+// Use Web Crypto API in Workers, Node.js crypto in Node.js
+let randomUUID: () => string;
+type HashResult = { digest: (encoding: 'hex') => string | Promise<string> };
+type HashBuilder = { update: (data: string) => HashResult };
+let createHash: (algorithm: string) => HashBuilder;
+
+if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+  // Web Crypto API (Cloudflare Workers)
+  randomUUID = () => crypto.randomUUID();
+  createHash = (algorithm: string) => {
+    const encoder = new TextEncoder();
+    let dataBuffer = new Uint8Array(0);
+    return {
+      update: (data: string) => {
+        const newData = encoder.encode(data);
+        const combined = new Uint8Array(dataBuffer.length + newData.length);
+        combined.set(dataBuffer);
+        combined.set(newData, dataBuffer.length);
+        dataBuffer = combined;
+        return {
+          digest: async (encoding: 'hex') => {
+            const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+          }
+        };
+      }
+    };
+  };
+} else if (typeof process !== 'undefined' && process.versions?.node) {
+  // Node.js crypto
+  const cryptoModule = await import('crypto');
+  randomUUID = cryptoModule.randomUUID;
+  createHash = cryptoModule.createHash;
+} else {
+  // Fallback
+  randomUUID = () => uuidv4();
+  createHash = () => {
+    throw new Error('Hash not available in this environment');
+  };
+}
 import type { PaymentQuote, PaymentIntent, AgentCallEnvelope, PaymentReceipt } from '../../shared/ap2.js';
 
 import {
@@ -26,26 +72,86 @@ import {
   ExecutionEventBus,
   DefaultRequestHandler,
 } from "@a2a-js/sdk/server";
-import { A2AExpressApp } from "@a2a-js/sdk/server/express";
+import { A2AHonoApp } from "./hono-adapter.js";
 import { openAiToolDefinitions, openAiToolHandlers } from "./tools.js";
 import { giveFeedbackWithDelegation, getFeedbackAuthId as serverGetFeedbackAuthId, requestFeedbackAuth } from './agentAdapter.js';
 //import { buildDelegationSetup } from './session.js';
 
-if (!process.env.OPENAI_API_KEY || !process.env.TMDB_API_KEY) {
-  console.error("OPENAI_API_KEY and TMDB_API_KEY environment variables are required")
-  process.exit(1);
-}
+type MovieAgentRuntimeEnv = Record<string, string | undefined>;
+
+// Runtime environment bindings (Cloudflare Workers secrets/vars are provided via `env`)
+// Populated by setupMovieAgentApp().
+let RUNTIME_ENV: MovieAgentRuntimeEnv = {};
 
 // Simple store for contexts
 const contexts: Map<string, Message[]> = new Map();
 
-// Load and render system prompt from file
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const promptPath = path.join(__dirname, "movie_agent.prompt");
+// Default prompt template (used in all environments)
+// In Cloudflare Workers, we can't read files, so we embed the prompt here
+const DEFAULT_PROMPT = `You are a movie expert. Answer the user's question about movies and film industry personalities, using the searchMovies and searchPeople tools to find out more information as needed. Feel free to call them multiple times in parallel if necessary.{{#if goal}}
+
+Your goal in this task is: {{goal}}{{/if}}
+
+The current date and time is: {{now}}
+
+If the user asks you for specific information about a movie or person (such as the plot or a specific role an actor played), do a search for that movie/actor using the available functions before responding.
+
+## Output Instructions
+
+ALWAYS end your response with either "COMPLETED" or "AWAITING_USER_INPUT" on its own line. If you have answered the user's question, use COMPLETED. If you need more information to answer the question, use AWAITING_USER_INPUT.
+
+<example>
+<question>
+when was [some_movie] released?
+</question>
+<output>
+[some_movie] was released on October 3, 1992.
+COMPLETED
+</output>
+</example>`;
+
+// Load and render system prompt from file (local dev only) or use default
+// In Cloudflare Workers, file system is not available, so we always use the embedded prompt
+let filePrompt: string | undefined = undefined;
+
+// Try to read prompt file only in Node.js environment (lazy load to avoid issues in Workers)
+async function tryLoadPromptFile(): Promise<string | undefined> {
+  // Check if we're in Node.js environment
+  if (typeof process === 'undefined' || !process.versions?.node || typeof import.meta === 'undefined' || !import.meta.url) {
+    return undefined; // Cloudflare Workers - skip file reading
+  }
+  
+  try {
+    // Dynamic import to avoid bundling issues in Workers
+    const fs = await import("fs");
+    const path = await import("path");
+    const { fileURLToPath } = await import("url");
+    
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const promptPath = path.join(__dirname, "movie_agent.prompt");
+    
+    return fs.readFileSync(promptPath, "utf-8");
+  } catch (e) {
+    // File read failed, will use default
+    console.warn('[MovieAgent] Could not read prompt file, using default:', e);
+    return undefined;
+  }
+}
+
+// Initialize prompt file (only in Node.js, skip in Workers)
+if (typeof process !== 'undefined' && process.versions?.node) {
+  tryLoadPromptFile().then(prompt => {
+    if (prompt) filePrompt = prompt;
+  }).catch(() => {
+    // Ignore errors, will use default
+  });
+}
 
 function renderSystemPrompt(goal?: string): string {
-  const raw = fs.readFileSync(promptPath, "utf-8");
+  // Use file prompt if available (local dev), otherwise use default (Cloudflare Workers)
+  const raw = filePrompt || DEFAULT_PROMPT;
+  
   // Remove explicit role line from template
   let content = raw.replace(/^\s*{{role\s+"system"}}\s*\n?/, "");
   const nowStr = new Date().toISOString();
@@ -191,7 +297,7 @@ class MovieAgentExecutor implements AgentExecutor {
 
     try {
       // 4. Call OpenAI with function tools, handle tool calls loop
-      const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const client = new OpenAI({ apiKey: RUNTIME_ENV.OPENAI_API_KEY });
       const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
       let assistantText: string | null = null;
@@ -337,7 +443,10 @@ class MovieAgentExecutor implements AgentExecutor {
 
 // Get agent name from environment variables
 const agentName = process.env.AGENT_NAME || process.env.MOVIE_AGENT_NAME || 'Movie Agent';
-const agentUrl = process.env.AGENT_URL || `http://${process.env.HOST || 'localhost'}:${process.env.PORT || 41241}/`;
+// Prefer explicit base URL if provided (useful for deployments)
+const agentUrl =
+  process.env.MOVIE_AGENT_URL ||
+  `http://${process.env.HOST || 'localhost'}:${process.env.PORT || 41241}/`;
 
 const movieAgentCard: AgentCard = {
   name: agentName,
@@ -392,7 +501,29 @@ const movieAgentCard: AgentCard = {
   supportsAuthenticatedExtendedCard: false,
 };
 
-async function main() {
+/**
+ * Sets up and returns the Hono app for movie-agent
+ * This function can be used both for local development and Cloudflare Workers
+ */
+export async function setupMovieAgentApp(opts?: { env?: MovieAgentRuntimeEnv }): Promise<Hono> {
+  const ENV: MovieAgentRuntimeEnv = opts?.env ?? (typeof process !== 'undefined' ? (process.env as any) : {});
+  RUNTIME_ENV = ENV;
+  // Make env accessible to other modules (e.g., tools.js) in Cloudflare Workers runtime.
+  (globalThis as any).MOVIE_AGENT_ENV = ENV;
+
+  // Check environment variables (don't exit in Cloudflare Workers environment)
+  if (!ENV.OPENAI_API_KEY || !ENV.TMDB_API_KEY) {
+    console.error("OPENAI_API_KEY and TMDB_API_KEY environment variables are required");
+    // Only exit for local Node dev server runs (RUN_SERVER=1)
+    if (
+      typeof process !== 'undefined' &&
+      typeof process.env !== 'undefined' &&
+      process.env.RUN_SERVER === '1' &&
+      process.exit
+    ) {
+      process.exit(1);
+    }
+  }
   // Attempt to submit feedback via delegation on startup (expect giveFeedback event)
   try {
     console.info('***************  attempt to submit feedback via delegation (expect giveFeedback event) on startup')
@@ -422,35 +553,48 @@ async function main() {
     agentExecutor
   );
 
-  // 4. Create and setup A2AExpressApp
-  console.info("*************** create A2AExpressApp");
-  const appBuilder = new A2AExpressApp(requestHandler);
-  const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:4002,http://localhost:4003,http://localhost:5173,http://movieclient.localhost:3000')
+  // 4. Create and setup A2AHonoApp
+  console.info("*************** create A2AHonoApp");
+  const appBuilder = new A2AHonoApp(requestHandler);
+  const corsOriginsEnv = (process.env.CORS_ORIGINS || '').trim();
+  const allowedOrigins = (corsOriginsEnv || 'http://localhost:3000,http://localhost:4002,http://localhost:4003,http://localhost:4004,http://localhost:5173,http://movieclient.localhost:3000')
     .split(',')
-    .map(o => o.trim())
-    .filter(o => o.length > 0);
+    .map((o) => o.trim())
+    .filter((o) => o.length > 0);
 
-  console.info("*************** create express app");
-  const app = express() as any;
-  // If CORS_ORIGINS includes "*", reflect request origin (dev-friendly).
-  const allowAnyOrigin = allowedOrigins.includes('*');
-  app.use(cors({ origin: allowAnyOrigin ? true : allowedOrigins }));
+  console.info("*************** create Hono app");
+  const app = new Hono();
+  // If CORS_ORIGINS is not set, default to allow all origins (agent card is public).
+  // If CORS_ORIGINS includes "*", allow all origins (dev-friendly).
+  const allowAnyOrigin = !corsOriginsEnv || allowedOrigins.includes('*');
+  app.use('/*', cors({
+    // Hono CORS: prefer reflecting the request origin when allowing any origin.
+    // This avoids some browser quirks and keeps `Vary: Origin` behavior consistent.
+    origin: allowAnyOrigin ? (origin) => origin || '*' : allowedOrigins,
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization', 'X-A2A-Extensions'],
+  }));
   console.info("*************** setup routes");
-  const expressApp = appBuilder.setupRoutes(app, "", undefined, ".well-known/agent.json");
+  const honoApp = appBuilder.setupRoutes(app, "", ".well-known/agent.json");
+  
+  // Add catch-all route to ensure all requests return a Response
+  honoApp.all('*', (c) => {
+    return c.json({ error: 'Not Found' }, 404);
+  });
 
   // 4.5. Agent card endpoint is handled automatically by A2AExpressApp.setupRoutes()
   // No need for custom endpoint - A2AExpressApp serves it from the requestHandler
 
   // 4.6. Add feedback auth endpoint
   console.info("*************** add feedback auth endpoint");
-  expressApp.get('/api/feedback-auth/:clientAddress', async (req: any, res: any) => {
+  honoApp.get('/api/feedback-auth/:clientAddress', async (c) => {
     try {
-      const { clientAddress } = req.params;
+      const clientAddress = c.req.param('clientAddress');
       const feedbackAuthId = await serverGetFeedbackAuthId({ clientAddress });
-      res.json({ feedbackAuthId });
+      return c.json({ feedbackAuthId });
     } catch (error: any) {
       console.error('[MovieAgent] Error getting feedback auth ID:', error?.message || error);
-      res.status(500).json({ error: error?.message || 'Internal server error' });
+      return c.json({ error: error?.message || 'Internal server error' }, 500);
     }
   });
 
@@ -461,9 +605,10 @@ async function main() {
     return new ethers.Wallet(pk);
   };
 
-  expressApp.post('/ap2/quote', async (req: any, res: any) => {
+  honoApp.post('/ap2/quote', async (c) => {
     try {
-      const { capability = 'summarize:v1' } = req.body || {};
+      const body = await c.req.json().catch(() => ({}));
+      const { capability = 'summarize:v1' } = body || {};
       const agent = String(process.env.MOVIE_AGENT_ADDRESS || '0x0000000000000000000000000000000000000000');
       const chainIdHex = (process.env.ERC8004_CHAIN_HEX || '0xaa36a7') as `0x${string}`;
 
@@ -482,16 +627,16 @@ async function main() {
       const msg = JSON.stringify(quote);
       const sig = await wallet.signMessage(ethers.getBytes(ethers.hashMessage(msg)));
       quote.agentSig = sig;
-      res.json(quote);
+      return c.json(quote);
     } catch (e: any) {
-      res.status(400).json({ error: e?.message || 'Failed to produce quote' });
+      return c.json({ error: e?.message || 'Failed to produce quote' }, 400);
     }
   });
 
   // AP2: minimal invoke endpoint
-  expressApp.post('/ap2/invoke', async (req: any, res: any) => {
+  honoApp.post('/ap2/invoke', async (c) => {
     try {
-      const env: AgentCallEnvelope = req.body;
+      const env: AgentCallEnvelope = await c.req.json();
       if (!env?.payment?.intent) throw new Error('missing payment intent');
 
       const intent: PaymentIntent = env.payment.intent;
@@ -512,7 +657,8 @@ async function main() {
       const meteredUnits = 1;
       const rate = Number(process.env.AP2_RATE || '0.001');
       const amount = (meteredUnits * rate).toString();
-      const requestHash = createHash('sha256').update(JSON.stringify(env.payload || {})).digest('hex');
+      const hashResult = createHash('sha256').update(JSON.stringify(env.payload || {}));
+      const requestHash = await hashResult.digest('hex');
       const receipt: PaymentReceipt = {
         requestHash: `0x${requestHash}` as `0x${string}`,
         meteredUnits,
@@ -526,17 +672,18 @@ async function main() {
       const sig = await wallet.signMessage(ethers.getBytes(ethers.hashMessage(JSON.stringify(receipt))));
       receipt.agentSig = sig;
 
-      res.json({ ok: true, receipt, result: { message: 'capability executed' } });
+      return c.json({ ok: true, receipt, result: { message: 'capability executed' } });
     } catch (e: any) {
-      res.status(400).json({ error: e?.message || 'invoke failed' });
+      return c.json({ error: e?.message || 'invoke failed' }, 400);
     }
   });
 
   // 4.6. Add A2A skill HTTP shim: agent.feedback.requestAuth
   // POST /a2a/skills/agent.feedback.requestAuth
-  expressApp.post('/a2a/skills/agent.feedback.requestAuth', async (req: any, res: any) => {
+  honoApp.post('/a2a/skills/agent.feedback.requestAuth', async (c) => {
     try {
-      console.info(`************ [MovieAgent] requestAuthabc123qqq: ${JSON.stringify(req.body)}`);
+      const body = await c.req.json().catch(() => ({}));
+      console.info(`************ [MovieAgent] requestAuthabc123qqq: ${JSON.stringify(body)}`);
       // Expected request body parameters (matching agentAdapter.ts function signature):
       // - clientAddress (required): string - Client's Ethereum address
       // - chainId (required): number - Chain ID (defaults to 11155111 for Sepolia)
@@ -544,17 +691,17 @@ async function main() {
       // - expirySeconds (required): number - Expiration time in seconds (defaults to 3600)
       // - agentId (required): string - Agent ID as string (will be converted to BigInt)
       // - taskRef (required): string - Task reference identifier
-      const { agentId, clientAddress, taskRef, chainId, expirySeconds, expiry, indexLimit } = req.body || {};
+      const { agentId, clientAddress, taskRef, chainId, expirySeconds, expiry, indexLimit } = body || {};
       
       // Validate required parameters
       if (!clientAddress) {
-        return res.status(400).json({ error: 'clientAddress is required' });
+        return c.json({ error: 'clientAddress is required' }, 400);
       }
       if (!agentId) {
-        return res.status(400).json({ error: 'agentId is required' });
+        return c.json({ error: 'agentId is required' }, 400);
       }
       if (!taskRef) {
-        return res.status(400).json({ error: 'taskRef is required' });
+        return c.json({ error: 'taskRef is required' }, 400);
       }
       
       // Support both 'expiry' and 'expirySeconds' for backward compatibility
@@ -571,28 +718,64 @@ async function main() {
       });
       console.info("........... request feedback auth result ........: ", result);
       // Convert result to JSON-safe format (BigInt values are already strings in the result)
-      res.json({
+      return c.json({
         feedbackAuthId: result.signature,
         signature: result.signature,
         signerAddress: result.signerAddress
       });
     } catch (error: any) {
       console.error('[MovieAgent] requestAuth error:', error?.message || error);
-      res.status(500).json({ error: error?.message || 'Internal server error' });
+      return c.json({ error: error?.message || 'Internal server error' }, 500);
     }
   });
 
-  // 5. Start the server
-  console.info("*************** start the server");
-  const PORT = Number(process.env.PORT) || 41241;
-  const HOST = process.env.HOST || '0.0.0.0'; // Use 0.0.0.0 to bind to all interfaces, or 'localhost' for local only
-  expressApp.listen(PORT, HOST, () => {
-    const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
-    console.log(`[MovieAgent] Server using new framework started on http://${displayHost}:${PORT}`);
-    console.log(`[MovieAgent] Agent: http://${displayHost}:${PORT}/.well-known/agent.json`);
-    console.log('[MovieAgent] Press Ctrl+C to stop the server');
-  });
+  return honoApp;
 }
 
-main().catch(console.error);
+async function main() {
+  const app = await setupMovieAgentApp();
+
+  // 5. Start the server (only for local development)
+  // For Hono, we need to use a Node.js HTTP server adapter
+  console.info("*************** start the server");
+  const PORT = Number(process.env.PORT) || 41241;
+  const HOST = process.env.HOST || '0.0.0.0';
+  
+  // Import Node.js http server for local dev (only in Node.js, not Workers)
+  if (typeof process !== 'undefined' && process.versions?.node) {
+    try {
+      const { serve } = await import('@hono/node-server');
+      serve({
+        fetch: app.fetch,
+        port: PORT,
+        hostname: HOST,
+      }, (info) => {
+        const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
+        console.log(`[MovieAgent] Server using Hono started on http://${displayHost}:${PORT}`);
+        console.log(`[MovieAgent] Agent: http://${displayHost}:${PORT}/.well-known/agent.json`);
+        console.log('[MovieAgent] Press Ctrl+C to stop the server');
+      });
+    } catch (e) {
+      console.error('[MovieAgent] Failed to start server:', e);
+      process.exit(1);
+    }
+  } else {
+    console.warn('[MovieAgent] Node.js server not available - this is likely Cloudflare Workers');
+  }
+}
+
+// IMPORTANT:
+// This file is imported by Cloudflare Workers (`cloudflare.ts`). With `nodejs_compat`,
+// Cloudflare provides a `process` shim, so `process.versions.node` may exist.
+// We must NOT auto-start a local Node HTTP server in Workers.
+//
+// For local dev, run with RUN_SERVER=1 (wired up in package.json scripts).
+const SHOULD_RUN_MAIN =
+  typeof process !== "undefined" &&
+  typeof process.env !== "undefined" &&
+  process.env.RUN_SERVER === "1";
+
+if (SHOULD_RUN_MAIN) {
+  main().catch(console.error);
+}
 

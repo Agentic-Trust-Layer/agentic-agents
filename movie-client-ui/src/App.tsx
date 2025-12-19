@@ -3,8 +3,10 @@ import { A2AClient } from '@a2a-js/sdk/client'
 import type { Message, TaskStatusUpdateEvent, AgentCard } from '@a2a-js/sdk'
 import { v4 as uuidv4 } from 'uuid'
 
-const MOVIE_AGENT_URL = 'http://movieagent.localhost:5002'
-//const MOVIE_AGENT_URL = 'https://b07629d5.movie-agent.pages.dev'
+// Configure via Vite env (.env / .env.local).
+// IMPORTANT: Vite only exposes env vars prefixed with VITE_ to the browser.
+const MOVIE_AGENT_URL =
+  import.meta.env.VITE_MOVIE_AGENT_URL || 'http://movieagent.localhost:5002'
 // Use local backend server (same port as backend)
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000'
 

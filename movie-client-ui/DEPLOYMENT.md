@@ -155,10 +155,11 @@ Cloudflare Pages supports continuous deployment from Git:
 
 To change which movie agent the UI connects to:
 
-1. Edit `src/App.tsx`:
-   ```typescript
-   const MOVIE_AGENT_URL = 'https://your-agent-url.pages.dev'
-   ```
+1. Set environment variables (recommended):
+   - Frontend (Vite): `VITE_MOVIE_AGENT_URL`
+   - Backend (Node): `MOVIE_AGENT_URL`
+
+   Use `movie-client-ui/env.example` as a template.
 
 2. Rebuild and redeploy:
    ```bash
