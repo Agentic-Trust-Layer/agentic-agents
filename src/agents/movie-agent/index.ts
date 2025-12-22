@@ -73,7 +73,7 @@ import {
   DefaultRequestHandler,
 } from "@a2a-js/sdk/server";
 import { UnauthenticatedUser } from '@a2a-js/sdk/server';
-import { A2AHonoApp, createJsonRpcHandler } from "./hono-adapter.js";
+import { A2AHonoApp, createAgentCardHandler, createJsonRpcHandler } from "./hono-adapter.js";
 import { openAiToolDefinitions, openAiToolHandlers } from "./tools.js";
 import { requestFeedbackAuth } from './agentAdapter.js';
 //import { buildDelegationSetup } from './session.js';
@@ -448,11 +448,6 @@ function buildMovieAgentCard(ENV: MovieAgentRuntimeEnv): AgentCard {
     console.warn('[MovieAgent] AGENT_NAME is not set; using fallback name "Agent".');
   }
 
-  // Prefer explicit base URL if provided (useful for deployments)
-  const agentUrl =
-    (ENV.MOVIE_AGENT_URL || ENV.AGENT_URL || '').trim() ||
-    `http://${ENV.HOST || 'localhost'}:${ENV.PORT || 41241}/`;
-
   // Best-effort: include ERC-8004 registration metadata from the session package if provided.
   // (Put custom fields under an extension params object for spec compliance.)
   let agentIdFromSession = 0;
@@ -475,14 +470,11 @@ function buildMovieAgentCard(ENV: MovieAgentRuntimeEnv): AgentCard {
     description: 'An agent that can answer questions about movies and actors using TMDB.',
     version: '0.0.4',
 
-    // This will be rewritten to the request origin in `hono-adapter.ts` for agent.json responses.
-    url: agentUrl,
-
     supportedInterfaces: [
-      // Preferred: HTTP+JSON envelope (what many A2A clients send today)
-      { url: '/api', protocolBinding: 'HTTP+JSON' },
-      // Also supported: JSON-RPC 2.0 over HTTP
+      // Preferred: JSON-RPC 2.0 over HTTP
       { url: '/api/a2a', protocolBinding: 'JSONRPC' },
+      // Also supported: HTTP+JSON envelope
+      { url: '/api', protocolBinding: 'HTTP+JSON' },
     ],
 
     provider: {
@@ -639,7 +631,10 @@ export async function setupMovieAgentApp(opts?: { env?: MovieAgentRuntimeEnv }):
     allowHeaders: ['Content-Type', 'Authorization', 'X-A2A-Extensions'],
   }));
   console.info("*************** setup routes");
-  const honoApp = appBuilder.setupRoutes(app, "", ".well-known/agent.json");
+  // A2A v1.0 well-known agent card
+  const honoApp = appBuilder.setupRoutes(app, "", ".well-known/agent-card.json");
+  // Legacy alias for older clients that still fetch /.well-known/agent.json
+  honoApp.get('/.well-known/agent.json', createAgentCardHandler({ agentCardProvider: requestHandler as any }));
 
   // A2A v1.0 JSON-RPC endpoint (stable path). The SDK JSON-RPC handler is also mounted at POST / by setupRoutes().
   // We add this alias so agent cards can advertise a conventional /api/a2a interface.

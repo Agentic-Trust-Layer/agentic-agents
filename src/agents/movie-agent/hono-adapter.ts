@@ -136,10 +136,11 @@ export function createAgentCardHandler(options: { agentCardProvider: { getAgentC
   return async (c: Context) => {
     try {
       const agentCard = await provider();
-      // Ensure the returned AgentCard.url matches the request origin in deployed environments
-      // (e.g., Cloudflare Workers) instead of localhost defaults.
       const origin = new URL(c.req.url).origin;
       const baseUrl = origin.endsWith("/") ? origin : `${origin}/`;
+      const pathname = new URL(c.req.url).pathname;
+      const isLegacyAgentJson = pathname.endsWith('/.well-known/agent.json');
+
       const supportedInterfaces = Array.isArray((agentCard as any)?.supportedInterfaces)
         ? (agentCard as any).supportedInterfaces.map((iface: any) => {
             const u = String(iface?.url || '').trim();
@@ -149,7 +150,21 @@ export function createAgentCardHandler(options: { agentCardProvider: { getAgentC
           })
         : undefined;
 
-      return c.json({ ...(agentCard as any), url: baseUrl, ...(supportedInterfaces ? { supportedInterfaces } : {}) });
+      // v1.0 AgentCard does NOT include a top-level `url`.
+      // Keep it ONLY for the legacy `agent.json` endpoint to avoid breaking older readers.
+      const basePayload: any = { ...(agentCard as any), ...(supportedInterfaces ? { supportedInterfaces } : {}) };
+
+      if (isLegacyAgentJson) {
+        // Compatibility: some older clients require top-level `url` as the service endpoint.
+        // Prefer the first supported interface URL (rewritten to absolute), otherwise fall back to origin.
+        const preferredEndpoint =
+          (supportedInterfaces && supportedInterfaces[0] && String(supportedInterfaces[0].url || '').trim()) || baseUrl;
+        basePayload.url = preferredEndpoint;
+      } else {
+        delete basePayload.url;
+      }
+
+      return c.json(basePayload);
     } catch (error) {
       console.error("Error fetching agent card:", error);
       return c.json({ error: "Failed to retrieve agent card" }, 500);
