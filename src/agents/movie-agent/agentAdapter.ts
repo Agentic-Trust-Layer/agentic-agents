@@ -1004,7 +1004,18 @@ export async function requestFeedbackAuth(params: {
   const nowSec = BigInt(Math.floor(Date.now() / 1000));
   const expirySec = BigInt(Number(params.expirySeconds ?? process.env.ERC8004_FEEDBACKAUTH_TTL_SEC ?? 3600));
   const expiry = nowSec + expirySec;
-  const indexLimit = params.indexLimit ?? 1n;
+  // If caller didn't provide indexLimit, compute a safe next indexLimit from on-chain state:
+  // indexLimit must be > current lastIndex, otherwise giveFeedback will revert with "IndexLimit exceeded".
+  const U64_MAX = 18446744073709551615n;
+  let indexLimit: bigint;
+  if (params.indexLimit !== undefined) {
+    indexLimit = params.indexLimit;
+  } else {
+    const lastIndexFetched = await (rep as any).getLastIndex(agentIdForRequest, params.clientAddress);
+    const lastIndex = typeof lastIndexFetched === 'bigint' ? lastIndexFetched : BigInt(lastIndexFetched || 0);
+    indexLimit = lastIndex + 1n;
+  }
+  if (indexLimit > U64_MAX) indexLimit = U64_MAX;
   const chainId = BigInt(Number(params.chainId ?? process.env.ERC8004_CHAIN_ID ?? 11155111));
 
   const feedbackAuth = await rep.signFeedbackAuth({

@@ -666,7 +666,6 @@ export async function setupMovieAgentApp(opts?: { env?: MovieAgentRuntimeEnv }):
         clientAddress: clientAddress as `0x${string}`,
         // Let the agent use the session package agentId (and enforce mismatch checks elsewhere)
         expirySeconds: Number(process.env.ERC8004_FEEDBACKAUTH_TTL_SEC || 3600),
-        indexLimit: 1n,
         chainId: Number(process.env.ERC8004_CHAIN_ID || 11155111),
         taskRef: `http-${Date.now()}`,
       });
@@ -858,7 +857,6 @@ export async function setupMovieAgentApp(opts?: { env?: MovieAgentRuntimeEnv }):
         clientAddress: clientAddress as `0x${string}`,
         taskRef: `api-${Date.now()}`,
         chainId,
-        indexLimit: 1n,
         expirySeconds,
       });
 
