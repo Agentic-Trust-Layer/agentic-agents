@@ -5,8 +5,20 @@ import { v4 as uuidv4 } from 'uuid'
 
 // Configure via Vite env (.env / .env.local).
 // IMPORTANT: Vite only exposes env vars prefixed with VITE_ to the browser.
-const MOVIE_AGENT_URL =
+function normalizeAgentBaseUrl(input: string): string {
+  const trimmed = String(input || '').trim()
+  if (!trimmed) return ''
+  try {
+    const u = new URL(trimmed)
+    return u.origin
+  } catch {
+    return trimmed.replace(/\/+$/, '').replace(/\/\.well-known\/agent\.json\/?$/, '').replace(/\/api\/a2a\/?$/, '').replace(/\/api\/?$/, '')
+  }
+}
+
+const MOVIE_AGENT_URL = normalizeAgentBaseUrl(
   import.meta.env.VITE_MOVIE_AGENT_URL || 'http://movieagent.localhost:5002'
+)
 const AGENT_DISPLAY_NAME =
   import.meta.env.VITE_AGENT_NAME || 'Agent'
 // Use local backend server (same port as backend)
