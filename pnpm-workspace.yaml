@@ -1,5 +1,4 @@
 packages:
-  - "movie-client-ui"
   - "src/**"
 
 ignoredBuiltDependencies:

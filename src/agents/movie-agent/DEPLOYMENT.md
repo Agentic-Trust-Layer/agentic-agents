@@ -128,7 +128,7 @@ After deployment, your agent will be available at:
 After deploying, update your client apps to use the new agent URL:
 
 ```typescript
-// In movie-client-ui/src/App.tsx
+// In the client UI app
 const MOVIE_AGENT_URL = 'https://your-deployed-agent-url'
 ```
 
