@@ -138,3 +138,4 @@ const MOVIE_AGENT_URL = 'https://your-deployed-agent-url'
 2. Test A2A endpoint: `https://your-agent-url/a2a` (POST with JSON-RPC)
 3. Verify CORS headers are set correctly
 
+
