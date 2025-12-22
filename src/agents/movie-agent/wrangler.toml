@@ -9,7 +9,7 @@ compatibility_flags = [
 [vars]
 # Non-secret Worker environment variables
 # These values are provided to `fetch(request, env, ctx)` as the `env` object.
-AGENT_NAME = "movie-reviewer-v2.8004-agent.eth"
+AGENT_NAME = "movies.8004-agent.eth"
 AGENTIC_TRUST_DISCOVERY_URL = "https://8004-agent.io"
 AGENTIC_TRUST_RPC_URL_SEPOLIA = "https://eth-sepolia.g.alchemy.com/v2/WvEny4nR70VTUMX0DfR-A"
 # Optional: explicitly set identity registry for Sepolia (used by some Agentic Trust SDK paths)

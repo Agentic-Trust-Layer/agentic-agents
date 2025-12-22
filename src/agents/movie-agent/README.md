@@ -60,7 +60,7 @@ AGENT_NAME=Your Agent Name
 PORT=5002
 HOST=0.0.0.0
 
-wrangler secret put AGENTIC_TRUST_SESSION_PACKAGE_JSON
+wrangler secret put AGENTIC_TRUST_SESSION_PACKAGE_JSON < secret.sessionPackage.json
 
 # Blockchain / ERC-8004 Configuration
 RPC_URL=https://rpc.sepolia.org
@@ -72,6 +72,17 @@ BUNDLER_URL=https://api.pimlico.io/v2/11155111/rpc?apikey=your_key
 AGENT_EOA_PRIVATE_KEY=0x...
 ERC8004_FEEDBACKAUTH_TTL_SEC=3600
 ```
+
+## Cloudflare Worker secrets (required for deployed `movie-agent`)
+
+Do **not** commit the session package JSON to the repo. Set it as a Wrangler secret:
+
+```bash
+cd src/agents/movie-agent
+wrangler secret put AGENTIC_TRUST_SESSION_PACKAGE_JSON < secret.sessionPackage.json
+```
+
+If you prefer, you can also paste the JSON when `wrangler` prompts you (same result).
 
 ## Running the Agent
 

@@ -948,19 +948,8 @@ export async function requestFeedbackAuth(params: {
   const client = await getAgenticTrustClient();
 
   // Session package is required to know which agent ID / signer is issuing auth.
-  // In Workers, file system access is unreliable; require JSON via env.
-  let sp: any;
-  const runtimeEnv = (globalThis as any)?.MOVIE_AGENT_ENV as Record<string, string | undefined> | undefined;
-  if (runtimeEnv) {
-    const spJson = requireRuntimeEnv('AGENTIC_TRUST_SESSION_PACKAGE_JSON');
-    try {
-      sp = JSON.parse(spJson);
-    } catch (e: any) {
-      throw new Error(`Invalid AGENTIC_TRUST_SESSION_PACKAGE_JSON: ${e?.message || e}`);
-    }
-  } else {
-    sp = loadSessionPackage();
-  }
+  // Require JSON via env/secret in all runtimes (Worker + local).
+  const sp: any = loadSessionPackage();
 
   // STRICT: ensure the caller and this server are referencing the same agent.
   // If the client/backend resolved agentId=4476 but this Worker is configured with a session package for agentId=4475,

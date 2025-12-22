@@ -304,10 +304,13 @@ async function resolveFeedbackAuth(params: { clientAddress: string; agentName: s
   const hasSkill = skills.some((s: any) => s?.id === 'agent.feedback.requestAuth' || s?.name === 'agent.feedback.requestAuth');
   if (!hasSkill) throw new Error('Agent does not advertise agent.feedback.requestAuth');
   
-  // Call the skill endpoint
+  // Prefer calling like Agentic Trust "A2AProtocolProvider" clients do:
+  // POST {origin}/api with an envelope containing skillId + payload.
+  // Fall back to our older direct HTTP shim POST /a2a/skills/agent.feedback.requestAuth if needed.
+  const apiEnvelopeUrl = `${base}/api`;
   const a2aBase = (card?.endpoint && typeof card.endpoint === 'string') ? String(card.endpoint).replace(/\/+$/, '') : `${base}/a2a`;
-  const skillUrl = `${a2aBase}/skills/agent.feedback.requestAuth`;
-  console.info(`[MovieClientUI] Calling feedbackAuth skill at: ${skillUrl}`);
+  const legacySkillUrl = `${a2aBase}/skills/agent.feedback.requestAuth`;
+  console.info(`[MovieClientUI] Calling feedbackAuth via API envelope at: ${apiEnvelopeUrl} (fallback: ${legacySkillUrl})`);
   
   // Prepare request body matching the endpoint signature:
   // - clientAddress (required): string - Client's Ethereum address
@@ -339,20 +342,58 @@ async function resolveFeedbackAuth(params: { clientAddress: string; agentName: s
   console.info("......... agentIdResolved: ", agentIdResolved?.toString());
   console.info(`[MovieClientUI] Request body for feedbackAuth:`, JSON.stringify(cleanRequestBody));
   
-  const resp = await fetch(skillUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(cleanRequestBody)  // Use cleaned request body without undefined values
-  });
-  
-  if (!resp.ok) {
-    const errorText = await resp.text().catch(() => '');
-    throw new Error(`Agent responded with ${resp.status}: ${errorText}`);
+  // 1) Try Agentic Trust envelope style
+  let resp: Response | null = null;
+  let data: any = null;
+  try {
+    const envelope = {
+      // These fields are commonly present in AgenticTrust A2AProtocolProvider requests, but our agent only requires skillId+payload.
+      fromAgentId: agentIdResolved.toString(),
+      toAgentId: canonicalAgentName || agentName,
+      message: 'Request feedback authorization',
+      payload: {
+        clientAddress: clientAddress as `0x${string}`,
+        agentId: agentIdResolved.toString(),
+      },
+      metadata: {
+        requestType: 'feedbackAuth',
+        agentId: agentIdResolved.toString(),
+        chainId: Number(process.env.ERC8004_CHAIN_ID || 11155111),
+      },
+      skillId: 'agent.feedback.requestAuth',
+    };
+    resp = await fetch(apiEnvelopeUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(envelope),
+    });
+    if (resp.ok) {
+      data = await resp.json().catch(() => ({}));
+    }
+  } catch {}
+
+  // 2) Fallback to legacy direct skill URL if envelope style fails (404 / older agent)
+  if (!resp || !resp.ok) {
+    const fallbackResp = await fetch(legacySkillUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cleanRequestBody), // Use cleaned request body without undefined values
+    });
+    if (!fallbackResp.ok) {
+      const errorText = await fallbackResp.text().catch(() => '');
+      throw new Error(`Agent responded with ${fallbackResp.status}: ${errorText}`);
+    }
+    data = await fallbackResp.json().catch(() => ({}));
   }
-  
-  const data = await resp.json();
-  console.info(`[MovieClientUI] Agent response:`, data);
-  const feedbackAuthId = data?.feedbackAuthId || data?.signature || data?.feedbackAuth || null;
+
+  console.info(`[MovieClientUI] feedbackAuth response:`, data);
+  const feedbackAuthId =
+    data?.feedbackAuthId ||
+    data?.signature ||
+    data?.feedbackAuth ||
+    data?.result?.feedbackAuthId ||
+    data?.result?.signature ||
+    null;
   if (!feedbackAuthId) {
     console.error(`[MovieClientUI] No feedbackAuth in response:`, data);
     throw new Error('No feedbackAuth returned by agent');

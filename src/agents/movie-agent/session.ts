@@ -1,8 +1,4 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { defineChain, http, createPublicClient, type Chain } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
+type RuntimeEnv = Record<string, string | undefined>;
 
 type Hex = `0x${string}`;
 
@@ -35,32 +31,54 @@ type SessionPackage = {
   };
 };
 
-export type DelegationSetup = {
-  agentId: number;
-  chainId: number;
-  chain: Chain;
-  rpcUrl: string;
-  bundlerUrl: string;
-  entryPoint: Hex;
-  aa: Hex;
-  sessionAA?: Hex;
-  reputationRegistry: Hex;
-  selector: Hex;
-  sessionKey: SessionPackage['sessionKey'];
-  signedDelegation: SessionPackage['signedDelegation'];
-  delegationRedeemData?: Hex;
-  publicClient: any;
-};
+function getRuntimeEnvValue(key: string): string | undefined {
+  const runtimeEnv = (globalThis as any)?.MOVIE_AGENT_ENV as RuntimeEnv | undefined;
+  const v = runtimeEnv?.[key] ?? (typeof process !== 'undefined' ? (process.env as any)?.[key] : undefined);
+  return typeof v === 'string' ? v : undefined;
+}
 
-export function loadSessionPackage(): SessionPackage {
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-  const p = path.join(__dirname, 'sessionPackage.json.secret');
+function requireRuntimeEnvValue(key: string): string {
+  const v = (getRuntimeEnvValue(key) || '').trim();
+  if (!v) {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+  return v;
+}
 
-  const raw = fs.readFileSync(p, 'utf-8');
-  const parsed = JSON.parse(raw);
+function decodeBase64ToString(b64: string): string {
+  // Prefer atob if present (Workers); fall back to Buffer (Node).
+  if (typeof (globalThis as any).atob === 'function') {
+    return (globalThis as any).atob(b64);
+  }
+  // eslint-disable-next-line no-undef
+  return Buffer.from(b64, 'base64').toString('utf-8');
+}
 
-  return parsed as SessionPackage;
+function parseSessionPackageJson(raw: string): any {
+  const trimmed = (raw || '').trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch (e1: any) {
+    // Support base64-encoded JSON to avoid quoting/escaping hassles in secrets tooling.
+    // Accepted formats:
+    // - "base64:<...>"
+    // - "<...>" (if it parses as base64 -> JSON)
+    const b64 = trimmed.startsWith('base64:') ? trimmed.slice('base64:'.length).trim() : trimmed;
+    try {
+      const decoded = decodeBase64ToString(b64);
+      return JSON.parse(decoded);
+    } catch (e2: any) {
+      throw new Error(
+        `Invalid AGENTIC_TRUST_SESSION_PACKAGE_JSON: ${e1?.message || e1}. ` +
+          `Also tried base64 decoding but failed: ${e2?.message || e2}`,
+      );
+    }
+  }
+}
+
+export function loadSessionPackage(): any {
+  const raw = requireRuntimeEnvValue('AGENTIC_TRUST_SESSION_PACKAGE_JSON');
+  return parseSessionPackageJson(raw);
 }
 
 export function validateSessionPackage(pkg: SessionPackage): void {
@@ -75,83 +93,3 @@ export function validateSessionPackage(pkg: SessionPackage): void {
     throw new Error('sessionPackage.signedDelegation.signature is required');
   }
 }
-
-function defaultRpcUrlFor(chainId: number): string | null {
-  if (process.env.RPC_URL) return process.env.RPC_URL;
-  if (process.env.JSON_RPC_URL) return process.env.JSON_RPC_URL;
-  switch (chainId) {
-    case 11155111: return 'https://rpc.sepolia.org';
-    case 1: return 'https://rpc.ankr.com/eth';
-    default: return null;
-  }
-}
-
-/*
-export function buildDelegationSetup(pkg?: SessionPackage): DelegationSetup {
-  const session = pkg ?? loadSessionPackage();
-  validateSessionPackage(session);
-  const rpcUrl = defaultRpcUrlFor(session.chainId);
-  if (!rpcUrl) throw new Error(`RPC URL not provided and no default known for chainId ${session.chainId}`);
-  const chain = defineChain({
-    id: session.chainId,
-    name: `chain-${session.chainId}`,
-    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-    rpcUrls: { default: { http: [rpcUrl] }, public: { http: [rpcUrl] } },
-  });
-  const publicClient: any = createPublicClient({ transport: http(rpcUrl) });
-  return {
-    agentId: session.agentId,
-    chainId: session.chainId,
-    chain,
-    rpcUrl,
-    bundlerUrl: session.bundlerUrl,
-    entryPoint: session.entryPoint,
-    aa: session.aa,
-    sessionAA: session.sessionAA,
-    reputationRegistry: session.reputationRegistry,
-    selector: session.selector,
-    sessionKey: session.sessionKey,
-    signedDelegation: session.signedDelegation,
-    delegationRedeemData: session.delegationRedeemData,
-    publicClient,
-  };
-}
-
-export async function buildAgentAccountFromSession(): Promise<any> {
-  const sp = buildDelegationSetup();
-  const client = createPublicClient({ transport: http(sp.rpcUrl) });
-  // Try multiple known builder APIs from permissionless/accounts to maximize compatibility across versions
-  let mod: any;
-  try {
-    mod = await import('permissionless/accounts');
-  } catch (e) {
-    throw new Error('permissionless/accounts not installed. Install it or provide agentAccount externally.');
-  }
-
-  const attempts: Array<() => Promise<any>> = [];
-  const owner = privateKeyToAccount(sp.sessionKey.privateKey);
-
-  
-  // Most recent APIs expect an owner Account, not raw privateKey
-  if (typeof mod?.toSimpleSmartAccount === 'function') {
-    attempts.push(() => mod.toSimpleSmartAccount({ client, owner, entryPoint: sp.entryPoint }));
-  }
-  if (typeof mod?.to7702SimpleSmartAccount === 'function') {
-    attempts.push(() => mod.to7702SimpleSmartAccount({ client, owner, entryPoint: sp.entryPoint }));
-  }
-  if (typeof mod?.privateKeyToSimpleSmartAccount === 'function') {
-    attempts.push(() => mod.privateKeyToSimpleSmartAccount({ client, privateKey: sp.sessionKey.privateKey, entryPoint: sp.entryPoint }));
-  }
-
-  for (const fn of attempts) {
-    try {
-      const account = await fn();
-      if (account) return account;
-    } catch {}
-  }
-
-  const available = Object.keys(mod || {});
-  throw new Error(`No compatible smart account builder found in permissionless/accounts. Available exports: ${available.join(', ')}`);
-}
-
-*/
