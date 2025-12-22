@@ -73,7 +73,7 @@ import {
   DefaultRequestHandler,
 } from "@a2a-js/sdk/server";
 import { UnauthenticatedUser } from '@a2a-js/sdk/server';
-import { A2AHonoApp } from "./hono-adapter.js";
+import { A2AHonoApp, createJsonRpcHandler } from "./hono-adapter.js";
 import { openAiToolDefinitions, openAiToolHandlers } from "./tools.js";
 import { requestFeedbackAuth } from './agentAdapter.js';
 //import { buildDelegationSetup } from './session.js';
@@ -453,26 +453,70 @@ function buildMovieAgentCard(ENV: MovieAgentRuntimeEnv): AgentCard {
     (ENV.MOVIE_AGENT_URL || ENV.AGENT_URL || '').trim() ||
     `http://${ENV.HOST || 'localhost'}:${ENV.PORT || 41241}/`;
 
+  // Best-effort: include ERC-8004 registration metadata from the session package if provided.
+  // (Put custom fields under an extension params object for spec compliance.)
+  let agentIdFromSession = 0;
+  let agentAddressFromSession = '';
+  try {
+    const spRaw = (ENV as any)?.AGENTIC_TRUST_SESSION_PACKAGE_JSON || (typeof process !== 'undefined' ? (process.env as any)?.AGENTIC_TRUST_SESSION_PACKAGE_JSON : undefined);
+    if (typeof spRaw === 'string' && spRaw.trim()) {
+      const sp = JSON.parse(spRaw);
+      if (sp?.agentId !== undefined) agentIdFromSession = Number(sp.agentId) || 0;
+      // Prefer explicit agent address if present; fall back to sessionAA which is the signer for feedbackAuth.
+      agentAddressFromSession = String(sp?.agentAddress || sp?.sessionAA || '').trim();
+    }
+  } catch {
+    // ignore
+  }
+
   return {
+    protocolVersion: '1.0',
     name: name || 'Agent',
     description: 'An agent that can answer questions about movies and actors using TMDB.',
+    version: '0.0.4',
+
     // This will be rewritten to the request origin in `hono-adapter.ts` for agent.json responses.
     url: agentUrl,
+
+    supportedInterfaces: [
+      // Preferred: HTTP+JSON envelope (what many A2A clients send today)
+      { url: '/api', protocolBinding: 'HTTP+JSON' },
+      // Also supported: JSON-RPC 2.0 over HTTP
+      { url: '/api/a2a', protocolBinding: 'JSONRPC' },
+    ],
+
     provider: {
       organization: 'OrgTrust.eth',
       url: 'https://www.richcanvas3.com',
     },
-    version: '0.0.4',
-    protocolVersion: '0.3.0',
+
     capabilities: {
       streaming: true,
       pushNotifications: false,
       stateTransitionHistory: true,
+      extensions: [
+        {
+          uri: 'https://eips.ethereum.org/EIPS/eip-8004',
+          description: 'ERC-8004 feedbackAuth issuance metadata',
+          required: false,
+          params: {
+            trustModels: ['feedback'],
+            feedbackDataURI: '',
+            registrations: [
+              {
+                agentId: agentIdFromSession || 0,
+                agentAddress: agentAddressFromSession || '',
+                signature: '',
+              },
+            ],
+          },
+        },
+      ],
     },
-    securitySchemes: undefined,
-    security: undefined,
-    defaultInputModes: ['text'],
-    defaultOutputModes: ['text', 'task-status'],
+
+    defaultInputModes: ['text/plain'],
+    defaultOutputModes: ['text/plain', 'application/json'],
+
     skills: [
       {
         id: 'general_movie_chat',
@@ -487,8 +531,8 @@ function buildMovieAgentCard(ENV: MovieAgentRuntimeEnv): AgentCard {
           'Find action movies starring Keanu Reeves',
           'Which came out first, Jurassic Park or Terminator 2?',
         ],
-        inputModes: ['text'],
-        outputModes: ['text', 'task-status'],
+        inputModes: ['text/plain'],
+        outputModes: ['text/plain', 'application/json'],
       },
       {
         id: 'agent.feedback.requestAuth',
@@ -496,12 +540,13 @@ function buildMovieAgentCard(ENV: MovieAgentRuntimeEnv): AgentCard {
         description: 'Issue a signed ERC-8004 feedbackAuth for a client to submit feedback',
         tags: ['erc8004', 'feedback', 'auth', 'a2a'],
         examples: ['Client requests feedbackAuth after receiving results'],
-        inputModes: ['text'],
-        outputModes: ['text'],
+        inputModes: ['text/plain'],
+        outputModes: ['text/plain', 'application/json'],
       },
     ],
-    supportsAuthenticatedExtendedCard: false,
-  };
+
+    supportsExtendedAgentCard: false,
+  } as any;
 }
 
 /**
@@ -595,6 +640,23 @@ export async function setupMovieAgentApp(opts?: { env?: MovieAgentRuntimeEnv }):
   }));
   console.info("*************** setup routes");
   const honoApp = appBuilder.setupRoutes(app, "", ".well-known/agent.json");
+
+  // A2A v1.0 JSON-RPC endpoint (stable path). The SDK JSON-RPC handler is also mounted at POST / by setupRoutes().
+  // We add this alias so agent cards can advertise a conventional /api/a2a interface.
+  const jsonRpcHandler = createJsonRpcHandler({ requestHandler, userBuilder: async () => null } as any);
+  honoApp.post('/api/a2a', async (c) => {
+    const body: any = await c.req.json().catch(() => ({}));
+
+    // If this is a real JSON-RPC request, handle it as JSON-RPC.
+    if (body?.jsonrpc === '2.0') {
+      return jsonRpcHandler(c);
+    }
+
+    // Otherwise, treat it as the same HTTP+JSON envelope some clients send to /api.
+    // This prevents cached agent cards (or clients that ignore protocolBinding) from breaking.
+    (c as any).set?.('a2aBody', body);
+    return handleEnvelopeA2ARequest(c, body, '/api/a2a');
+  });
 
   // 4.5. Agent card endpoint is handled automatically by A2AExpressApp.setupRoutes()
   // No need for custom endpoint - A2AExpressApp serves it from the requestHandler
@@ -758,10 +820,8 @@ export async function setupMovieAgentApp(opts?: { env?: MovieAgentRuntimeEnv }):
   // Some external clients (e.g. AgenticTrust A2AProtocolProvider.sendMessage) POST an envelope to /api
   // instead of calling /a2a/skills/agent.feedback.requestAuth directly.
   // We accept that envelope here and translate it to requestFeedbackAuth().
-  honoApp.post('/api', async (c) => {
-    const body: any = await c.req.json().catch(() => ({}));
-
-    console.info('[MovieAgent] /api hit', {
+  function logEnvelopeHit(label: string, c: any, body: any) {
+    console.info(`[MovieAgent] ${label} hit`, {
       url: c.req.url,
       skillId: body?.skillId,
       toAgentId: body?.toAgentId,
@@ -769,55 +829,64 @@ export async function setupMovieAgentApp(opts?: { env?: MovieAgentRuntimeEnv }):
       metadata: body?.metadata,
       payloadKeys: body?.payload ? Object.keys(body.payload) : [],
     });
+  }
 
-    if (body?.skillId === 'agent.feedback.requestAuth') {
-      try {
-        const payload = body?.payload || {};
-        const clientAddress = String(payload?.clientAddress || '').trim();
-        const agentIdRaw = payload?.agentId ?? body?.metadata?.agentId;
-        const chainId = Number(body?.metadata?.chainId || process.env.ERC8004_CHAIN_ID || 11155111);
-        const expirySeconds = Number(process.env.ERC8004_FEEDBACKAUTH_TTL_SEC || 3600);
+  async function handleEnvelopeA2ARequest(c: any, body: any, label: string) {
+    logEnvelopeHit(label, c, body);
 
-        console.info('[MovieAgent] /api -> agent.feedback.requestAuth start', {
-          clientAddress,
-          agentId: agentIdRaw,
-          chainId,
-        });
-
-        if (!clientAddress || !clientAddress.startsWith('0x') || clientAddress.length !== 42) {
-          return c.json({ success: false, error: 'clientAddress missing/invalid' }, 400);
-        }
-        if (agentIdRaw === undefined || agentIdRaw === null || String(agentIdRaw).trim() === '') {
-          return c.json({ success: false, error: 'agentId missing' }, 400);
-        }
-
-        const result = await requestFeedbackAuth({
-          agentId: BigInt(agentIdRaw),
-          clientAddress: clientAddress as `0x${string}`,
-          taskRef: `api-${Date.now()}`,
-          chainId,
-          indexLimit: 1n,
-          expirySeconds,
-        });
-
-        console.info('[MovieAgent] /api -> agent.feedback.requestAuth SUCCESS', {
-          signerAddress: result.signerAddress,
-          signaturePrefix: String(result.signature || '').slice(0, 18),
-        });
-
-        return c.json({
-          success: true,
-          feedbackAuthId: result.signature,
-          signature: result.signature,
-          signerAddress: result.signerAddress,
-        });
-      } catch (e: any) {
-        console.error('[MovieAgent] /api -> agent.feedback.requestAuth FAILED:', e?.message || e);
-        return c.json({ success: false, error: e?.message || 'requestAuth failed' }, 500);
-      }
+    if (body?.skillId !== 'agent.feedback.requestAuth') {
+      return c.json({ success: false, error: 'Not Found' }, 404);
     }
 
-    return c.json({ success: false, error: 'Not Found' }, 404);
+    try {
+      const payload = body?.payload || {};
+      const clientAddress = String(payload?.clientAddress || '').trim();
+      const agentIdRaw = payload?.agentId ?? body?.metadata?.agentId;
+      const chainId = Number(body?.metadata?.chainId || process.env.ERC8004_CHAIN_ID || 11155111);
+      const expirySeconds = Number(process.env.ERC8004_FEEDBACKAUTH_TTL_SEC || 3600);
+
+      console.info(`[MovieAgent] ${label} -> agent.feedback.requestAuth start`, {
+        clientAddress,
+        agentId: agentIdRaw,
+        chainId,
+      });
+
+      if (!clientAddress || !clientAddress.startsWith('0x') || clientAddress.length !== 42) {
+        return c.json({ success: false, error: 'clientAddress missing/invalid' }, 400);
+      }
+      if (agentIdRaw === undefined || agentIdRaw === null || String(agentIdRaw).trim() === '') {
+        return c.json({ success: false, error: 'agentId missing' }, 400);
+      }
+
+      const result = await requestFeedbackAuth({
+        agentId: BigInt(agentIdRaw),
+        clientAddress: clientAddress as `0x${string}`,
+        taskRef: `api-${Date.now()}`,
+        chainId,
+        indexLimit: 1n,
+        expirySeconds,
+      });
+
+      console.info(`[MovieAgent] ${label} -> agent.feedback.requestAuth SUCCESS`, {
+        signerAddress: result.signerAddress,
+        signaturePrefix: String(result.signature || '').slice(0, 18),
+      });
+
+      return c.json({
+        success: true,
+        feedbackAuthId: result.signature,
+        signature: result.signature,
+        signerAddress: result.signerAddress,
+      });
+    } catch (e: any) {
+      console.error(`[MovieAgent] ${label} -> agent.feedback.requestAuth FAILED:`, e?.message || e);
+      return c.json({ success: false, error: e?.message || 'requestAuth failed' }, 500);
+    }
+  }
+
+  honoApp.post('/api', async (c) => {
+    const body: any = await c.req.json().catch(() => ({}));
+    return handleEnvelopeA2ARequest(c, body, '/api');
   });
 
   // Catch-all MUST be last, otherwise it will shadow routes like /a2a/skills/* and /api/*

@@ -140,7 +140,16 @@ export function createAgentCardHandler(options: { agentCardProvider: { getAgentC
       // (e.g., Cloudflare Workers) instead of localhost defaults.
       const origin = new URL(c.req.url).origin;
       const baseUrl = origin.endsWith("/") ? origin : `${origin}/`;
-      return c.json({ ...agentCard, url: baseUrl });
+      const supportedInterfaces = Array.isArray((agentCard as any)?.supportedInterfaces)
+        ? (agentCard as any).supportedInterfaces.map((iface: any) => {
+            const u = String(iface?.url || '').trim();
+            // Allow relative URLs in the provider (recommended) and rewrite them against request origin.
+            if (u.startsWith('/')) return { ...iface, url: `${origin}${u}` };
+            return iface;
+          })
+        : undefined;
+
+      return c.json({ ...(agentCard as any), url: baseUrl, ...(supportedInterfaces ? { supportedInterfaces } : {}) });
     } catch (error) {
       console.error("Error fetching agent card:", error);
       return c.json({ error: "Failed to retrieve agent card" }, 500);

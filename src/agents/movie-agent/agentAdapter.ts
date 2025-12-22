@@ -1,8 +1,7 @@
 import { createPublicClient, createWalletClient, custom, http, defineChain, encodeFunctionData, encodeAbiParameters, keccak256, isHex, hexToBytes, sliceHex, zeroAddress, toHex, getAddress, type Address, type Chain, type PublicClient, type Account } from "viem";
 import { identityRegistryAbi } from "../../lib/abi/identityRegistry.js";
 import { initReputationClient, getReputationClient as getReputationClientLegacy, initIdentityClient, getIdentityClient } from './clientProvider.js';
-// @ts-ignore - TS module resolution/types can vary across environments; exports exist at runtime.
-import { getAgenticTrustClient, loadSessionPackage } from '@agentic-trust/core/server';
+import { loadSessionPackage } from './session.js';
 import { reputationRegistryAbi } from "../../lib/abi/reputationRegistry.js";
 import { createBundlerClient, createPaymasterClient } from 'viem/account-abstraction';
 
@@ -872,7 +871,10 @@ export async function getFeedbackAuthId(params: {
     expiry = U64_MAX;
   }
 
-  const identityReg = await rep.getIdentityRegistry();
+  // Avoid relying on SDK internals for identity registry resolution; fetch it directly from the reputation registry.
+  const identityReg =
+    (await (rep as any)?.getIdentityRegistry?.().catch?.(() => undefined)) ||
+    (await fetchIdentityRegistry(publicClient, sp.reputationRegistry as `0x${string}`));
   feedbackAuth = await rep.signFeedbackAuth({
     agentId,
     clientAddress: clientAddress as `0x${string}`,
@@ -940,15 +942,8 @@ export async function requestFeedbackAuth(params: {
   const serializableParams = serializeBigInt(params);
   console.info(`********* [MovieAgent] requestAuthabcasss: ${JSON.stringify(serializableParams)}`);
 
-  // These are required for the AgenticTrust client + discovery-backed flows.
-  requireRuntimeEnv('AGENTIC_TRUST_DISCOVERY_URL');
-  // 8004-agent.io requires an access code; require it so we fail fast with a clear error.
-  requireRuntimeEnv('AGENTIC_TRUST_DISCOVERY_API_KEY');
-
-  const client = await getAgenticTrustClient();
-
-  // Session package is required to know which agent ID / signer is issuing auth.
-  // Require JSON via env/secret in all runtimes (Worker + local).
+  // Session package is required to sign feedbackAuth.
+  // We load it from AGENTIC_TRUST_SESSION_PACKAGE_JSON (Worker secret / env var).
   const sp: any = loadSessionPackage();
 
   // STRICT: ensure the caller and this server are referencing the same agent.
@@ -976,39 +971,51 @@ export async function requestFeedbackAuth(params: {
     throw new Error('Session package missing sessionAA');
   }
 
-  const agentIdStr = agentIdForRequest.toString();
-  console.info("........... agentIdForRequest ........ 1234: ", agentIdStr);
-  const agent = await client.agents.getAgent(agentIdStr);
-  console.info("........... agent ........ 1234: ", agent);
-  console.info("........... sp.agentId ........ 1234: ", String(sp?.agentId ?? ''));
-  console.info("........... params.clientAddress ........ 1234: ", params.clientAddress);
-          
-  if (!agent) {
-    throw new Error(`Agent not found for agentId=${agentIdForRequest}`);
+  // Directly sign feedbackAuth using the 8004 ext SDK (no discovery / no filesystem session package).
+  const rpcUrl = String(
+    sp?.rpcUrl ||
+      process.env.AGENTIC_TRUST_RPC_URL_SEPOLIA ||
+      process.env.RPC_URL ||
+      process.env.JSON_RPC_URL ||
+      '',
+  ).trim();
+  if (!rpcUrl) {
+    throw new Error('Session package missing rpcUrl (or set AGENTIC_TRUST_RPC_URL_SEPOLIA / RPC_URL / JSON_RPC_URL)');
   }
 
-  // Wire the session package into the agent instance (server-side helper in @agentic-trust/core)
-  if (typeof (agent as any).setSessionPackage === 'function') {
-    (agent as any).setSessionPackage(sp);
-  }
+  const ownerEOA = privateKeyToAccount(String(sp?.sessionKey?.privateKey || '').trim() as `0x${string}`);
+  const walletClient = createWalletClient({ chain: sepolia, transport: http(rpcUrl), account: ownerEOA }) as any;
+  const publicClient = createPublicClient({ chain: sepolia, transport: http(rpcUrl) });
 
-  // Newer SDK API: Agent.requestAuth(...)
-  if (typeof (agent as any).requestAuth !== 'function') {
-    throw new Error('Agent does not support requestAuth() in current SDK version');
-  }
-
-  const feedbackAuthResponse = await (agent as any).requestAuth({
-    clientAddress: params.clientAddress,
-    agentId: agentIdForRequest,
-    expirySeconds: params.expirySeconds,
-    skillId: 'agent.feedback.requestAuth',
+  const reputationRegistry = (String(sp?.reputationRegistry || '').trim() || getReputationRegistrySepolia()) as `0x${string}`;
+  const rep = await getReputationClientInitialized({
+    publicClient,
+    walletClient,
+    agentAccount: ownerEOA as any,
+    // Some SDK codepaths expect a "client" signer context as well; use the same signer for auth issuance.
+    clientAccount: ownerEOA as any,
+    reputationRegistry,
+    ensRegistry: getEnsRegistryFromEnv(),
   });
-  console.info("........... feedbackAuthResponse ........ 1234: ", feedbackAuthResponse);
 
-  const feedbackAuth = feedbackAuthResponse?.feedbackAuth || feedbackAuthResponse?.feedbackAuthId;
-  if (!feedbackAuth) {
-    throw new Error('No feedbackAuth returned by requestAuth()');
-  }
+  const identityReg =
+    (await (rep as any)?.getIdentityRegistry?.().catch?.(() => undefined)) ||
+    (await fetchIdentityRegistry(publicClient, reputationRegistry));
+  const nowSec = BigInt(Math.floor(Date.now() / 1000));
+  const expirySec = BigInt(Number(params.expirySeconds ?? process.env.ERC8004_FEEDBACKAUTH_TTL_SEC ?? 3600));
+  const expiry = nowSec + expirySec;
+  const indexLimit = params.indexLimit ?? 1n;
+  const chainId = BigInt(Number(params.chainId ?? process.env.ERC8004_CHAIN_ID ?? 11155111));
 
-  return { signature: feedbackAuth as `0x${string}`, signerAddress: signerAddress as `0x${string}` };
+  const feedbackAuth = await rep.signFeedbackAuth({
+    agentId: agentIdForRequest,
+    clientAddress: params.clientAddress,
+    indexLimit,
+    expiry,
+    chainId,
+    identityRegistry: identityReg as `0x${string}`,
+    signerAddress: signerAddress as `0x${string}`,
+  }) as `0x${string}`;
+
+  return { signature: feedbackAuth, signerAddress: signerAddress as `0x${string}` };
 }
